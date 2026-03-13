@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #6366f1;
+  --color-primary-hover: #4f46e5;
+  --color-surface: #1e1e2e;
+  --color-surface-light: #2a2a3e;
+  --color-surface-lighter: #363652;
+  --color-text: #e0e0e0;
+  --color-text-muted: #888;
+  --color-accent: #f59e0b;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+}
+
+html, body {
+  @apply bg-surface text-text m-0 p-0 h-full;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+#app {
+  @apply h-full;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-surface;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-surface-lighter rounded-full;
+}
+
+input[type="range"] {
+  @apply appearance-none bg-transparent cursor-pointer;
+}
+input[type="range"]::-webkit-slider-track {
+  @apply h-1.5 rounded-full bg-surface-lighter;
+}
+input[type="range"]::-webkit-slider-thumb {
+  @apply appearance-none w-5 h-5 md:w-4 md:h-4 rounded-full bg-primary -mt-[7px] md:-mt-[5px];
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  @apply bg-primary-hover;
+}
+
+/* Prevent text selection on UI controls during drag */
+.touch-none {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Safe area padding for notched devices */
+@supports (padding: env(safe-area-inset-bottom)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
