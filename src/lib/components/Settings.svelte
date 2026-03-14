@@ -131,7 +131,6 @@
 
       <!-- License info -->
       <div>
-        <span class="text-xs text-text-muted block mb-1">ライセンス</span>
         <div class="text-[11px] text-text-muted space-y-1">
           <a
             class="block hover:text-text underline underline-offset-2"
@@ -140,14 +139,6 @@
             rel="noopener noreferrer"
           >
             OSSライセンス一覧を開く
-          </a>
-          <a
-            class="block hover:text-text underline underline-offset-2"
-            href="https://github.com/rkgo55/MimiqPlayer"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            ソースコード（GitHub）
           </a>
         </div>
       </div>

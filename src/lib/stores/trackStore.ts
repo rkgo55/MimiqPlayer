@@ -53,6 +53,16 @@ function createTrackStore() {
         tracks.map((t) => (t.id === id ? { ...t, stemStatus: status } : t)),
       );
     },
+
+    /** Update editable metadata (title / artist / album) and persist to DB */
+    async updateTrackInfo(id: string, fields: { title?: string; artist?: string; album?: string }) {
+      update((tracks) =>
+        tracks.map((t) => (t.id === id ? { ...t, ...fields } : t)),
+      );
+      const { getTrackMeta } = await import('../storage/db');
+      const meta = await getTrackMeta(id);
+      if (meta) await saveTrackMeta({ ...meta, ...fields });
+    },
   };
 }
 

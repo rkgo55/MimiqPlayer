@@ -425,13 +425,11 @@ function createPlayerStore() {
       if (meta) await saveTrackMeta({ ...meta, bookmarks: next });
     },
 
-    async updateBookmark(id: string, label: string, useCurrentAB: boolean) {
+    async updateBookmark(id: string, label: string, a: number, b: number) {
       const state = get({ subscribe });
       const current = get(bookmarks);
       const next = current.map((bm) => {
         if (bm.id !== id) return bm;
-        const a = useCurrentAB ? (state.abRepeat.a ?? bm.a) : bm.a;
-        const b = useCurrentAB ? (state.abRepeat.b ?? bm.b) : bm.b;
         return { ...bm, label: label.trim() || bm.label, a, b };
       });
       bookmarks.set(next);
