@@ -143,7 +143,7 @@
           </a>
           <a
             class="block hover:text-text underline underline-offset-2"
-            href="https://github.com/g-okamura/music"
+            href="https://github.com/rkgo55/MimiqPlayer"
             target="_blank"
             rel="noopener noreferrer"
           >

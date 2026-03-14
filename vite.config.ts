@@ -4,7 +4,6 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import tailwindcss from '@tailwindcss/vite'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
-import { VitePWA } from 'vite-plugin-pwa'
 import type { Plugin } from 'vite'
 
 // Plugin to forcibly set COOP/COEP headers after all other middleware,
@@ -55,7 +54,7 @@ function ortAssetsDevPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? ''
         // Strip base path prefix and query string
-        const bare = url.replace(/^\/?mimi-copy\//, '').split('?')[0]
+        const bare = url.replace(/^\/?MimiqPlayer\//, '').split('?')[0]
         const ext  = path.extname(bare)
         if (bare.startsWith('ort-') && ext in MIME) {
           const file = path.join(ortDist, bare)
@@ -86,45 +85,12 @@ export default defineConfig({
       targets: [
         { src: 'node_modules/onnxruntime-web/dist/*.wasm', dest: '.' },
         { src: 'node_modules/onnxruntime-web/dist/*.mjs',  dest: '.' },
+        // coi-serviceworker: injects COOP/COEP headers via SW on GitHub Pages
+        { src: 'node_modules/coi-serviceworker/coi-serviceworker.min.js', dest: '.' },
       ],
     }),
-    VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: 'auto',
-      // Use custom SW (src/sw.ts) to handle both offline caching AND COOP/COEP
-      // header injection (required on GitHub Pages where server headers can't be set).
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.ts',
-      injectManifest: {
-        // Pre-cache app shell (JS/CSS/HTML/images).
-        // Exclude large ONNX / Essentia WASM blobs — they're hundreds of MB
-        // and the app already caches the model separately via Cache API.
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
-        globIgnores: ['**/ort-*', '**/essentia-*'],
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-      },
-      manifest: {
-        name: 'MimiqPlayer',
-        short_name: 'MimiqPlayer',
-        description: '耳コピ支援ツール',
-        theme_color: '#141008',
-        background_color: '#141008',
-        display: 'standalone',
-        orientation: 'any',
-        start_url: '/mimi-copy/',
-        scope: '/mimi-copy/',
-        icons: [
-          { src: 'logo-192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'logo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
-        ],
-      },
-      devOptions: {
-        enabled: false, // SW は開発中無効（HMR との干渉防止）
-      },
-    }),
   ],
-  base: '/mimi-copy/',
+  base: '/MimiqPlayer/',
   optimizeDeps: {
     // Prevent Vite from pre-bundling onnxruntime-web; it ships its own ESM
     // entry points and dynamic WASM loading that Vite's bundler would break.
