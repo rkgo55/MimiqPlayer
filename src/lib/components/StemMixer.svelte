@@ -56,7 +56,7 @@
     if (!cached) {
       const modelOpt = STEM_MODEL_OPTIONS.find((m) => m.id === settings.stemModel) ?? STEM_MODEL_OPTIONS[0];
       const ok = confirm(
-        `モデルデータ（約${modelOpt.sizeMB}MB）のダウンロードが必要です。\nWiFi環境での使用を推奨します。\n続行しますか？`,
+        `※モバイルでは安定して動作しない可能性があります。 \n※モデルデータ（約${modelOpt.sizeMB}MB）のダウンロードが必要です。\nWiFi環境での使用を推奨します。\n続行しますか？`,
       );
       if (!ok) return;
     }
