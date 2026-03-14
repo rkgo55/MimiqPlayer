@@ -38,6 +38,41 @@ const engine = new AudioEngine();
 // Apply saved EQ on startup
 engine.setEQ(loadEQFromStorage());
 
+/**
+ * Register Media Session action handlers once.
+ * These let the OS notification area / lock screen control playback.
+ */
+function setupMediaSession(store: ReturnType<typeof createPlayerStore>) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.setActionHandler('play', () => store.play());
+  navigator.mediaSession.setActionHandler('pause', () => store.pause());
+  navigator.mediaSession.setActionHandler('stop', () => store.stop());
+  navigator.mediaSession.setActionHandler('seekbackward', (details) =>
+    store.skip(-(details.seekOffset ?? 10)),
+  );
+  navigator.mediaSession.setActionHandler('seekforward', (details) =>
+    store.skip(details.seekOffset ?? 10),
+  );
+  navigator.mediaSession.setActionHandler('seekto', (details) => {
+    if (details.seekTime !== undefined) store.seek(details.seekTime);
+  });
+}
+
+function updateMediaSessionPositionState(currentTime: number, duration: number, speed: number) {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    if (duration > 0 && currentTime <= duration) {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: speed,
+        position: currentTime,
+      });
+    }
+  } catch {
+    // Ignore: position state is best-effort
+  }
+}
+
 /** Most recently loaded AudioBuffer — used for structure analysis */
 let _currentAudioBuffer: AudioBuffer | null = null;
 
@@ -63,6 +98,11 @@ function releaseWakeLock() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && _isPlaying) {
     void requestWakeLock();
+    // Resume AudioContext and flush SoundTouch buffers to prevent crackle noise
+    void engine.handleForeground();
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
   }
 });
 
@@ -112,6 +152,7 @@ function createPlayerStore() {
   // Set up engine callbacks
   engine.onProgress((currentTime, duration) => {
     update((s) => ({ ...s, currentTime, duration }));
+    updateMediaSessionPositionState(currentTime, duration, engine.speed);
   });
 
   engine.onPlaybackEnded(() => {
@@ -119,6 +160,9 @@ function createPlayerStore() {
     stopABCheck();
     _isPlaying = false;
     releaseWakeLock();
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'paused';
+    }
   });
 
   return {
@@ -158,6 +202,19 @@ function createPlayerStore() {
         if (!isCurrentTrack()) return;
 
         bookmarks.set(meta?.bookmarks ?? []);
+
+        // Update Media Session metadata now that we have title / artist / art
+        if ('mediaSession' in navigator) {
+          const artwork: MediaImage[] = meta?.coverArt
+            ? [{ src: meta.coverArt, sizes: '512x512', type: 'image/jpeg' }]
+            : [];
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: meta?.title || '',
+            artist: meta?.artist || '',
+            album: meta?.album || '',
+            artwork,
+          });
+        }
 
         // Restore per-track EQ (fallback to global localStorage value, then flat)
         const savedEQ = meta?.eq ?? loadEQFromStorage();
@@ -287,6 +344,9 @@ function createPlayerStore() {
       startABCheck();
       _isPlaying = true;
       void requestWakeLock();
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
     },
 
     pause() {
@@ -294,6 +354,9 @@ function createPlayerStore() {
       update((s) => ({ ...s, isPlaying: false }));
       _isPlaying = false;
       releaseWakeLock();
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
     },
 
     togglePlay() {
@@ -311,6 +374,9 @@ function createPlayerStore() {
       stopABCheck();
       _isPlaying = false;
       releaseWakeLock();
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
     },
 
     seek(time: number) {
@@ -526,3 +592,4 @@ function createPlayerStore() {
 }
 
 export const playerStore = createPlayerStore();
+setupMediaSession(playerStore);

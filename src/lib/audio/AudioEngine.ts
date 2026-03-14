@@ -296,6 +296,50 @@ export class AudioEngine {
     this.audioBuffer = null;
   }
 
+  /**
+   * Called when the app returns to foreground after being backgrounded.
+   *
+   * Mobile browsers (iOS Safari in particular) suspend the AudioContext when
+   * the page is hidden. On resume two problems arise:
+   *   1. The context stays suspended and audio is silent.
+   *   2. SoundTouch's AudioWorklet ring-buffer accumulates stale data during
+   *      the suspension gap, producing a burst of crackle/noise when playback
+   *      resumes.
+   *
+   * This method:
+   *   - Resumes the AudioContext if it is suspended.
+   *   - For normal (SoundTouch) mode: re-seeks to the current position so
+   *     the SoundTouch pipeline is torn down and rebuilt fresh, flushing
+   *     the stale buffer.
+   *   - For stem mode: just ensures the AudioContext is running and restarts
+   *     the rAF time-tracking loop if it stopped.
+   */
+  async handleForeground(): Promise<void> {
+    if (!this.audioContext) return;
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+    if (!this._isPlaying) return;
+
+    if (!this.hasStemAudio) {
+      // Normal mode: rebuild the SoundTouch pipeline to flush stale buffers
+      const time = this.currentTime;
+      this._isPlaying = false;
+      this._stopTimeTracking();
+      this._teardownPlaybackGraph();
+      this._savedTime = time;
+      void this._startPlayback(
+        this.audioContext,
+        this._duration > 0 ? time / this._duration : 0,
+      );
+    } else {
+      // Stem mode: rAF loop may have stopped while backgrounded; restart it
+      if (this.animFrameId === null) {
+        this._startTimeTracking();
+      }
+    }
+  }
+
   private async _startPlayback(ctx: AudioContext, startPercentage = 0): Promise<void> {
     if (ctx.state === 'suspended') {
       await ctx.resume();
