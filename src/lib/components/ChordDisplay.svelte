@@ -1,9 +1,10 @@
 <script lang="ts">
   import { playerStore, analyzingTrackId as analyzingTrackIdStore, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
-  import { getCurrentChord } from '../audio/AudioAnalyzer';
-  import { transposeKey, transposeChord } from '../audio/chordUtils';
-  import type { PlayerState } from '../types';
-  import type { ChordInfo } from '../audio/AudioAnalyzer';
+  import { settingsStore } from '../stores/settingsStore';
+  import { apiKeyModalStore } from '../stores/uiStore';
+  import { getCurrentChord, transposeKey, transposeChord } from '../audio/chordUtils';
+  import { get } from 'svelte/store';
+  import type { PlayerState, ChordInfo } from '../types';
 
   let ps: PlayerState = $state({
     trackId: null, isPlaying: false, currentTime: 0, duration: 0,
@@ -64,6 +65,10 @@
 
   async function handleAnalyze() {
     if (isAnalyzing || !ps.trackId) return;
+    if (!get(settingsStore).apiKey) {
+      apiKeyModalStore.set(true);
+      return;
+    }
     aiError = null;
     try {
       await playerStore.analyzeTrack();

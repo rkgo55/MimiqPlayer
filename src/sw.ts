@@ -1,13 +1,9 @@
 /// <reference lib="webworker" />
 /**
- * Custom Service Worker — precaching + COOP/COEP header injection
+ * Custom Service Worker — precaching
  *
- * GitHub Pages does not support custom HTTP response headers, so COOP/COEP
- * (required for SharedArrayBuffer / ONNX Runtime Web) must be injected here.
- *
- * Uses the standard Cache API instead of Workbox runtime helpers to avoid
- * API-version mismatches. vite-plugin-pwa still injects self.__WB_MANIFEST
- * at build time — we just read the URL list from it.
+ * vite-plugin-pwa injects self.__WB_MANIFEST at build time.
+ * Uses the standard Cache API instead of Workbox runtime helpers.
  */
 
 declare const self: ServiceWorkerGlobalScope & {
@@ -43,31 +39,13 @@ self.addEventListener('activate', (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((k) => k !== CACHE_NAME && !k.startsWith('demucs-'))
+          .filter((k) => k !== CACHE_NAME)
           .map((k) => caches.delete(k)),
       );
       await self.clients.claim();
     })(),
   );
 });
-
-// ─── COOP/COEP header injection ──────────────────────────────────────────────
-
-function withHeaders(response: Response): Response {
-  // Can't modify opaque responses
-  if (response.status === 0) return response;
-
-  const headers = new Headers(response.headers);
-  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-  headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
-  headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
 
 // ─── Fetch: cache-first for app shell, network for the rest ─────────────────
 
@@ -77,10 +55,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cached = await caches.match(event.request);
-      if (cached) return withHeaders(cached);
+      if (cached) return cached;
 
       try {
-        return withHeaders(await fetch(event.request));
+        return await fetch(event.request);
       } catch {
         return new Response('Offline', {
           status: 503,

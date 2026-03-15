@@ -2,6 +2,7 @@
   import { selectedTrack, trackStore } from '../stores/trackStore';
   import { playerStore, analyzingStructureTrackId as analyzingStructureTrackIdStore, trimStart as trimStartStore, trimEnd as trimEndStore, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
+  import { apiKeyModalStore } from '../stores/uiStore';
   import { stemStore, type StemState } from '../stores/stemStore';
   import { get } from 'svelte/store';
   import Waveform from './Waveform.svelte';
@@ -12,9 +13,13 @@
   import LoopBookmarks from './LoopBookmarks.svelte';
   import ChordDisplay from './ChordDisplay.svelte';
   import StemMixer from './StemMixer.svelte';
+  import APIKeyRequiredModal from './APIKeyRequiredModal.svelte';
   import type { TrackMeta, AppSettings, PlayerState, EQBands, LoopBookmark } from '../types';
   import { EQ_FLAT } from '../types';
   import { exportTrackAsZip, downloadBlob } from '../storage/trackExport';
+
+  let showApiKeyModal = $state(false);
+  apiKeyModalStore.subscribe((v) => (showApiKeyModal = v));
 
   let track: TrackMeta | null = $state(null);
   let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-6s', keepAwake: false, apiEndpoint: '', apiKey: '' });
@@ -136,12 +141,16 @@
 
   async function handleAutoBookmarks() {
     if (isAnalyzingBookmarks || !ps.trackId) return;
+    const apiEndpoint = get(settingsStore).apiEndpoint;
+    if (!get(settingsStore).apiKey) {
+      apiKeyModalStore.set(true);
+      return;
+    }
     const tid = ps.trackId;
     showBookmarks = true;
     autoBookmarksError = null;
     try {
       // If stems aren't ready yet and the API is configured, separate first
-      const apiEndpoint = get(settingsStore).apiEndpoint;
       if (stemState.status !== 'ready' && apiEndpoint) {
         await stemStore.separate(ps.trackId);
         // Abort structure analysis if separation failed
@@ -638,4 +647,9 @@
       </div>
     </div>
   </div>
+{/if}
+
+<!-- ── API Key Required Modal ─────────────────────────────────────────────── -->
+{#if showApiKeyModal}
+  <APIKeyRequiredModal />
 {/if}

@@ -1,13 +1,12 @@
 <script lang="ts">
   import { trackStore } from '../stores/trackStore';
   import { settingsStore } from '../stores/settingsStore';
-  import { STEM_MODEL_OPTIONS } from '../types';
   import type { AppSettings } from '../types';
   import { getStorageEstimate, deleteAllTracks } from '../storage/db';
 
   let isOpen = $state(false);
   let storage = $state({ usedMB: 0, quotaMB: 0, ratio: 0 });
-  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-4s', keepAwake: false, apiEndpoint: '', apiKey: '' });
+  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, keepAwake: false, apiEndpoint: '', apiKey: '' });
   const baseUrl = import.meta.env.BASE_URL;
   const builtInEndpoint = import.meta.env.VITE_API_ENDPOINT ?? '';
   const builtInApiKey = import.meta.env.VITE_API_KEY ?? '';
@@ -84,36 +83,12 @@
         {/if}
       </div>
 
-      <!-- AI Model selection -->
-      <div>
-        <span class="text-xs text-text-muted block mb-1.5">ステム分離モデル</span>
-        <div class="space-y-1">
-          {#each STEM_MODEL_OPTIONS as opt}
-            <label class="flex items-start gap-2 cursor-pointer group">
-              <input
-                type="radio"
-                name="stemModel"
-                value={opt.id}
-                checked={settings.stemModel === opt.id}
-                onchange={() => settingsStore.update((s) => ({ ...s, stemModel: opt.id }))}
-                class="mt-0.5 accent-primary"
-              />
-              <div>
-                <span class="text-xs text-text group-hover:text-text">{opt.label}</span>
-                <p class="text-[10px] text-text-muted leading-tight">{opt.description}</p>
-              </div>
-            </label>
-          {/each}
-        </div>
-      </div>
-
       <!-- API settings -->
       <div>
-        <span class="text-xs text-text-muted block mb-1.5">外部 API (Modal)</span>
         <div class="space-y-1.5">
           <div>
             <label for="apiKey-input" class="text-[10px] text-text-muted block mb-0.5">
-              API Key（オプション）
+              API Key
               {#if builtInApiKey}
                 <span class="ml-1 text-primary/70">(ビルド時設定済み)</span>
               {/if}
@@ -121,17 +96,12 @@
             <input
               id="apiKey-input"
               type="password"
-              placeholder={builtInApiKey ? '••••••••' : 'Token'}
+              placeholder={builtInApiKey ? '••••••••' : 'Keyを入力'}
               value={settings.apiKey}
               oninput={(e) => settingsStore.update((s) => ({ ...s, apiKey: (e.target as HTMLInputElement).value.trim() }))}
               class="w-full text-[11px] bg-surface border border-surface-lighter rounded px-2 py-1 text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary"
             />
           </div>
-          {#if settings.apiEndpoint}
-            <p class="text-[10px] text-primary">✓ API 設定済み — トラック解析・ステム分離に使用されます</p>
-          {:else}
-            <p class="text-[10px] text-text-muted">未設定の場合はブラウザ内 AI を使用します</p>
-          {/if}
         </div>
       </div>
 

@@ -1,12 +1,12 @@
 /**
  * stemStore unit tests
  *
- * All external dependencies (StemSeparationClient, AudioEngine, IndexedDB) are
+ * External dependencies (AudioEngine, IndexedDB, apiClient, settingsStore) are
  * mocked so the tests focus on store state transitions.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
-import type { StemType, StemVolumes } from '../../types';
+import type { StemType } from '../../types';
 import { DEFAULT_STEM_VOLUMES } from '../../types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,17 +40,11 @@ function fakeStems(): Partial<Record<StemType, ArrayBuffer>> {
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-const { mockSeparateFn, mockOnModelDownload, mockEngine,
-        mockGetTrackMeta, mockSaveTrackMeta,
-        mockGetAllStemFiles, mockSaveStemFile,
-        mockCreateNewSeparateFn, mockCreateNewTerminate,
-        mockIsModelCached, mockOnBackendInfo } = vi.hoisted(() => ({
-  mockSeparateFn:     vi.fn(),
-  mockOnModelDownload: vi.fn().mockReturnValue(() => {}),
-  mockOnBackendInfo:  vi.fn().mockReturnValue(() => {}),
-  mockIsModelCached:  vi.fn().mockResolvedValue(true),
+const { mockSeparateApi, mockEngine, mockGetTrackMeta, mockSaveTrackMeta,
+        mockGetAllStemFiles, mockSaveStemFile } = vi.hoisted(() => ({
+  mockSeparateApi: vi.fn(),
   mockEngine: {
-    getAudioBuffer:           vi.fn(),
+    getAudioBuffer:            vi.fn(),
     loadStemsFromArrayBuffers: vi.fn().mockResolvedValue(undefined),
     setStemVolumes:            vi.fn(),
     setStemVolume:             vi.fn(),
@@ -60,40 +54,26 @@ const { mockSeparateFn, mockOnModelDownload, mockEngine,
   mockSaveTrackMeta:   vi.fn().mockResolvedValue(undefined),
   mockGetAllStemFiles: vi.fn(),
   mockSaveStemFile:    vi.fn().mockResolvedValue(undefined),
-  mockCreateNewSeparateFn: vi.fn(),
-  mockCreateNewTerminate:  vi.fn(),
 }));
 
-vi.mock('../../audio/StemSeparationClient', () => ({
-  StemSeparationClient: {
-    getInstance: () => ({
-      separate: mockSeparateFn,
-      onModelDownload: mockOnModelDownload,
-      onBackendInfo: mockOnBackendInfo,
-      isModelCached: mockIsModelCached,
-    }),
-    createNew: () => ({
-      separate: mockCreateNewSeparateFn,
-      terminate: mockCreateNewTerminate,
-      onModelDownload: vi.fn().mockReturnValue(() => {}),
-      onBackendInfo: vi.fn().mockReturnValue(() => {}),
-    }),
+vi.mock('../../audio/apiClient', () => ({
+  getApiClient: () => ({ separate: mockSeparateApi }),
+}));
+
+vi.mock('../settingsStore', () => ({
+  settingsStore: {
+    subscribe: (fn: (v: unknown) => void) => {
+      fn({ apiEndpoint: 'https://api.example.com', apiKey: 'key' });
+      return () => {};
+    },
   },
 }));
 
-// Mock wavUtils to avoid large WAV allocations in tests
-vi.mock('../../audio/wavUtils', () => ({
-  encodeWavStereo16: () => makeSilentWav(),
-  decodeWavStereo16: () => ({ left: new Float32Array(100), right: new Float32Array(100) }),
-}));
-
 vi.mock('../playerStore', async () => {
-  // Writable store so get(playerStore) works; default trackId matches test tracks
   const { writable } = await import('svelte/store');
   const _inner = writable({ trackId: null as string | null });
   const mockPS = {
     engine: mockEngine,
-    reAnalyzeWithStem: vi.fn().mockResolvedValue(undefined),
     subscribe: _inner.subscribe,
     _setTrackId: (id: string | null) => _inner.set({ trackId: id }),
   };
@@ -109,42 +89,11 @@ vi.mock('../../storage/db', () => ({
   saveTrackMeta:          (...args: unknown[]) => mockSaveTrackMeta(...args),
   getAllStemFiles:         (...args: unknown[]) => mockGetAllStemFiles(...args),
   saveStemFile:           (...args: unknown[]) => mockSaveStemFile(...args),
-  getAudioFile:           vi.fn().mockResolvedValue(null),
+  getAudioFile:           vi.fn().mockResolvedValue({ data: new ArrayBuffer(0) }),
   saveProcessingState:    vi.fn().mockResolvedValue(undefined),
   deleteProcessingState:  vi.fn().mockResolvedValue(undefined),
   getProcessingState:     vi.fn().mockResolvedValue(undefined),
 }));
-
-// OfflineAudioContext stub (for extractStereo44k in stemStore)
-class MockOfflineAudioContext {
-  numberOfChannels: number;
-  length: number;
-  sampleRate: number;
-  destination = {};
-  constructor(channels: number, length: number, sampleRate: number) {
-    this.numberOfChannels = channels;
-    this.length = length;
-    this.sampleRate = sampleRate;
-  }
-  createBufferSource() {
-    return { buffer: null, connect: vi.fn(), start: vi.fn() };
-  }
-  startRendering() {
-    // Return a fake rendered buffer at 44100 Hz
-    const rendered: AudioBuffer = {
-      numberOfChannels: 2,
-      length: this.length,
-      sampleRate: this.sampleRate,
-      duration: this.length / this.sampleRate,
-      getChannelData: (ch: number) => new Float32Array(this.length),
-      copyFromChannel: vi.fn(),
-      copyToChannel: vi.fn(),
-    } as unknown as AudioBuffer;
-    return Promise.resolve(rendered);
-  }
-}
-
-globalThis.OfflineAudioContext = MockOfflineAudioContext as unknown as typeof OfflineAudioContext;
 
 // ── Import store after mocks ──────────────────────────────────────────────────
 import { stemStore } from '../stemStore';
@@ -154,7 +103,6 @@ import { stemStore } from '../stemStore';
 describe('stemStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockOnModelDownload.mockReturnValue(() => {});
   });
 
   // ── onTrackLoaded ──────────────────────────────────────────────────────────
@@ -213,40 +161,32 @@ describe('stemStore', () => {
   // ── separate() ────────────────────────────────────────────────────────────
 
   describe('separate()', () => {
-    function makeFakeAudioBuffer(sampleRate = 44100): AudioBuffer {
-      const buf: AudioBuffer = {
-        numberOfChannels: 2,
-        length: sampleRate,
-        sampleRate,
-        duration: 1,
-        getChannelData: (ch: number) => new Float32Array(sampleRate),
-        copyFromChannel: vi.fn(),
-        copyToChannel: vi.fn(),
+    function makeFakeAudioBuffer(): AudioBuffer {
+      return {
+        numberOfChannels: 2, length: 44100, sampleRate: 44100, duration: 1,
+        getChannelData: () => new Float32Array(44100),
+        copyFromChannel: vi.fn(), copyToChannel: vi.fn(),
       } as unknown as AudioBuffer;
-      return buf;
     }
 
-    it('transitions state: none → processing → ready on success', async () => {
+    it('transitions state: none -> processing -> ready on success', async () => {
       mockEngine.getAudioBuffer.mockReturnValue(makeFakeAudioBuffer());
       mockGetTrackMeta.mockResolvedValue({ id: 'track-4' });
 
       const stems = fakeStems();
-      mockSeparateFn.mockResolvedValue({ stems });
-      // loadStemsIntoEngine needs all stems to be present in storage
+      mockSeparateApi.mockResolvedValue({ stems });
       mockGetAllStemFiles.mockResolvedValue(stems);
-      Object.assign(mockEngine, { loadedStemTypes: ['vocals', 'drums', 'bass', 'other'] });      // Set the current trackId in the player mock so the guard allows engine load
+      Object.assign(mockEngine, { loadedStemTypes: ['vocals', 'drums', 'bass', 'other'] });
+
       const { playerStore: mockPS } = await import('../playerStore');
       (mockPS as unknown as { _setTrackId: (id: string) => void })._setTrackId('track-4');
-      // Trigger and wait
+
       const promise = stemStore.separate('track-4');
 
-      // Initial transition to 'processing' happens synchronously before awaits
-      // (may be deferred slightly; flush microtasks)
       await Promise.resolve();
       let state = get(stemStore);
       expect(state.status).toBe('processing');
 
-      // Complete
       await promise;
 
       state = get(stemStore);
@@ -256,16 +196,16 @@ describe('stemStore', () => {
       expect(mockSaveStemFile).toHaveBeenCalledTimes(6);
     });
 
-    it('transitions state to error when separation fails', async () => {
+    it('transitions state to error when API separation fails', async () => {
       mockEngine.getAudioBuffer.mockReturnValue(makeFakeAudioBuffer());
       mockGetTrackMeta.mockResolvedValue({ id: 'track-5' });
-      mockSeparateFn.mockRejectedValue(new Error('WASM out of memory'));
+      mockSeparateApi.mockRejectedValue(new Error('API error'));
 
       await stemStore.separate('track-5');
 
       const state = get(stemStore);
       expect(state.status).toBe('error');
-      expect(state.message).toContain('WASM out of memory');
+      expect(state.message).toContain('API error');
     });
 
     it('does nothing if no AudioBuffer is loaded', async () => {
@@ -273,48 +213,33 @@ describe('stemStore', () => {
 
       await stemStore.separate('track-6');
 
-      expect(mockSeparateFn).not.toHaveBeenCalled();
+      expect(mockSeparateApi).not.toHaveBeenCalled();
     });
 
     it('returns immediately if status is already processing (guard)', async () => {
-      // Prime a track so the store is in processing state
-      mockEngine.getAudioBuffer.mockReturnValue(
-        (() => {
-          const buf: AudioBuffer = {
-            numberOfChannels: 2, length: 44100, sampleRate: 44100, duration: 1,
-            getChannelData: () => new Float32Array(44100),
-            copyFromChannel: vi.fn(), copyToChannel: vi.fn(),
-          } as unknown as AudioBuffer;
-          return buf;
-        })()
-      );
+      mockEngine.getAudioBuffer.mockReturnValue(makeFakeAudioBuffer());
       mockGetTrackMeta.mockResolvedValue({ id: 'track-guard' });
 
-      // Hold the first separate() call in-flight
       let resolveSep!: (v: { stems: Partial<Record<string, ArrayBuffer>> }) => void;
       const inflight = new Promise<{ stems: Partial<Record<string, ArrayBuffer>> }>((res) => {
         resolveSep = res;
       });
-      mockSeparateFn.mockReturnValue(inflight);
+      mockSeparateApi.mockReturnValue(inflight);
 
       const { playerStore: mockPS } = await import('../playerStore');
       (mockPS as unknown as { _setTrackId: (id: string) => void })._setTrackId('track-guard');
 
       const p1 = stemStore.separate('track-guard');
-      // Let microtasks run so status transitions to 'processing'
       await Promise.resolve();
       await Promise.resolve();
 
-      // Second call while still processing — should be a no-op
       const p2 = stemStore.separate('track-guard');
-      await p2; // resolves immediately since guard fires
+      await p2;
 
-      // Resolve the first call
       resolveSep({ stems: {} });
       await p1;
 
-      // separate was called only once
-      expect(mockSeparateFn).toHaveBeenCalledTimes(1);
+      expect(mockSeparateApi).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -355,68 +280,5 @@ describe('stemStore', () => {
       expect(mockEngine.clearStems).toHaveBeenCalledOnce();
     });
   });
-
-  // ── separate() parallel path (long audio) ─────────────────────────────────
-
-  describe('separate() parallel path (long audio >30.5 s)', () => {
-    /** 2 full 30-second segments worth of samples at 44100 Hz → triggers parallel */
-    const LONG_SAMPLES = 2 * 30 * 44100; // 2,646,000
-
-    function makeLongAudioBuffer(): AudioBuffer {
-      return {
-        numberOfChannels: 2,
-        length: LONG_SAMPLES,
-        sampleRate: 44100,
-        duration: LONG_SAMPLES / 44100,
-        getChannelData: (_ch: number) => new Float32Array(LONG_SAMPLES),
-        copyFromChannel: vi.fn(),
-        copyToChannel: vi.fn(),
-      } as unknown as AudioBuffer;
-    }
-
-    beforeEach(async () => {
-      mockEngine.getAudioBuffer.mockReturnValue(makeLongAudioBuffer());
-      mockGetTrackMeta.mockResolvedValue({ id: 'track-parallel', title: 'Long Track', stemStatus: 'none' });
-      mockSeparateFn.mockResolvedValue({ stems: fakeStems() });
-      mockCreateNewSeparateFn.mockResolvedValue({ stems: fakeStems() });
-      mockGetAllStemFiles.mockResolvedValue(fakeStems());
-      Object.assign(mockEngine, { loadedStemTypes: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'] });
-      // Set trackId so the engine-load guard allows processing
-      const { playerStore: mockPS } = await import('../playerStore');
-      (mockPS as unknown as { _setTrackId: (id: string) => void })._setTrackId('track-parallel');
-    });
-
-    it('creates a new worker for the second segment', async () => {
-      await stemStore.separate('track-parallel');
-      // Singleton handles segment 0; createNew handles segment 1
-      expect(mockCreateNewSeparateFn).toHaveBeenCalledTimes(1);
-    });
-
-    it('terminates the additional worker after completion', async () => {
-      await stemStore.separate('track-parallel');
-      expect(mockCreateNewTerminate).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls singleton.separate once for segment 0', async () => {
-      await stemStore.separate('track-parallel');
-      expect(mockSeparateFn).toHaveBeenCalledTimes(1);
-    });
-
-    it('saves 6 merged stems and reaches ready state', async () => {
-      await stemStore.separate('track-parallel');
-      expect(mockSaveStemFile).toHaveBeenCalledTimes(6);
-      const state = get(stemStore);
-      expect(state.status).toBe('ready');
-    });
-
-    it('shows segment progress message during processing', async () => {
-      let seenProgressMsg = false;
-      const unsub = stemStore.subscribe((s) => {
-        if (s.message.includes('セグメント')) seenProgressMsg = true;
-      });
-      await stemStore.separate('track-parallel');
-      unsub();
-      expect(seenProgressMsg).toBe(true);
-    });
-  });
 });
+

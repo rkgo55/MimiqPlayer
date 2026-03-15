@@ -14,7 +14,14 @@
     abRepeat: { enabled: false, a: null, b: null },
   });
 
-  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0 });
+  let settings: AppSettings = $state({ 
+    skipDuration: 5, 
+    defaultSpeed: 1, 
+    defaultPitch: 0,
+    keepAwake: false,
+    apiEndpoint: '',
+    apiKey: '',
+  });
 
   playerStore.subscribe((v) => (ps = v));
   settingsStore.subscribe((v) => (settings = v));

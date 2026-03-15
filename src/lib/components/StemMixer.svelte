@@ -2,9 +2,10 @@
   import { stemStore, type StemState } from '../stores/stemStore';
   import { playerStore } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
-  import type { StemType, PlayerState, AppSettings } from '../types';
-  import { StemSeparationClient } from '../audio/StemSeparationClient';
-  import { STEM_TYPES_6, STEM_LABELS, STEM_MODEL_OPTIONS, DEFAULT_SETTINGS } from '../types';
+  import { apiKeyModalStore } from '../stores/uiStore';
+  import { get } from 'svelte/store';
+  import type { StemType, PlayerState } from '../types';
+  import { STEM_TYPES_6, STEM_LABELS } from '../types';
   import { DEFAULT_STEM_VOLUMES } from '../types';
 
   let stemState: StemState = $state({
@@ -12,9 +13,7 @@
     volumes: { ...DEFAULT_STEM_VOLUMES },
     downloadProgress: null,
     message: '',
-    remainingSeconds: null,
     loadedStems: null,
-    backend: null,
   });
   let ps: PlayerState = $state({
     trackId: null,
@@ -27,11 +26,8 @@
     abRepeat: { enabled: false, a: null, b: null },
   });
 
-  let settings: AppSettings = $state({ ...DEFAULT_SETTINGS });
-
   stemStore.subscribe((v) => (stemState = v));
   playerStore.subscribe((v) => (ps = v));
-  settingsStore.subscribe((v) => (settings = v));
 
   const trackId = $derived(ps.trackId);
 
@@ -52,13 +48,9 @@
 
   async function handleSeparate() {
     if (!trackId) return;
-    const cached = await StemSeparationClient.getInstance().isModelCached();
-    if (!cached) {
-      const modelOpt = STEM_MODEL_OPTIONS.find((m) => m.id === settings.stemModel) ?? STEM_MODEL_OPTIONS[0];
-      const ok = confirm(
-        `※モバイルでは安定して動作しない可能性があります。 \n※モデルデータ（約${modelOpt.sizeMB}MB）のダウンロードが必要です。\nWiFi環境での使用を推奨します。\n続行しますか？`,
-      );
-      if (!ok) return;
+    if (!get(settingsStore).apiKey) {
+      apiKeyModalStore.set(true);
+      return;
     }
     void stemStore.separate(trackId);
   }
@@ -69,16 +61,6 @@
 
   function handleReset() {
     void stemStore.resetVolumes(trackId);
-  }
-
-  /** Format remaining seconds into a human-readable Japanese label */
-  function formatRemaining(sec: number): string {
-    if (sec <= 0) return 'もうすぐ完了';
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    if (m === 0) return `残り約${s}秒`;
-    if (s === 0) return `残り約${m}分`;
-    return `残り約${m}分${s}秒`;
   }
 
   // Stem icon paths (24×24 viewBox, stroke-based)
@@ -153,11 +135,7 @@
       <div class="flex items-start justify-between gap-2">
         <p class="text-xs text-text-muted">
           {stemState.message}
-          {#if stemState.remainingSeconds !== null}
-            · {formatRemaining(stemState.remainingSeconds)}
-          {:else}
-            （数分かかる場合があります）
-          {/if}
+          （数分かかる場合があります）
         </p>
         <button
           class="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent transition-colors opacity-75 cursor-default"
@@ -240,20 +218,7 @@
     </div>
 
     <!-- Reset button -->
-    <div class="flex items-center justify-between pt-1">
-      {#if stemState.backend}
-        <span
-          class="text-[10px] font-medium px-1.5 py-0.5 rounded
-            {stemState.backend === 'webgpu'
-              ? 'bg-emerald-900/40 text-emerald-400'
-              : 'bg-surface-lighter text-text-muted'}"
-          title="ONNX Runtime Web 実行バックエンド"
-        >
-          {stemState.backend === 'webgpu' ? '⚡ GPU' : '⊞ CPU'}
-        </span>
-      {:else}
-        <span></span>
-      {/if}
+    <div class="flex items-center justify-end pt-1">
       <button
         class="text-xs text-text-muted hover:text-text transition-colors px-2 py-1 rounded"
         onclick={handleReset}

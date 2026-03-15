@@ -75,60 +75,17 @@ export interface ProcessingState {
   startedAt: number;
 }
 
-/** App settings */
-/** Stem separation model selection */
-export type StemModelId = 'htdemucs-6s' | 'htdemucs-4s';
-
-export interface StemModelOption {
-  id: StemModelId;
-  label: string;
-  description: string;
-  /** Download size in MB */
-  sizeMB: number;
-  url: string;
-  cacheKey: string;
-  /** Number of stems this model produces */
-  stemCount: 4 | 6;
-  /**
-   * Chunk size (samples) used for overlap-add inference.
-   * For smank/htdemucs-onnx: segment = 39/5 s × 44100 Hz = 343980.
-   * Must match the segment length the model was trained on for best quality.
-   */
-  chunkSamples: number;
+/** Chord information with start time */
+export interface ChordInfo {
+  time: number;  // seconds from start
+  chord: string; // e.g. "Am", "C", "G", "F#m"
 }
 
-export const STEM_MODEL_OPTIONS: StemModelOption[] = [
-  {
-    id: 'htdemucs-6s',
-    label: 'HTDemucs 6s (WebGPU)',
-    description: 'ONNX モデル。WebGPU 対応デバイスで高速化。ギター・ピアノも分離 (drums/bass/other/vocals/guitar/piano)',
-    sizeMB: 246,
-    // smank/htdemucs-onnx on HuggingFace (MIT license)
-    url: 'https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs_6s.onnx',
-    cacheKey: 'htdemucs_6s.onnx',
-    stemCount: 6,
-    // segment = 39/5 s × 44100 Hz = 343980
-    chunkSamples: 343_980,
-  },
-  {
-    id: 'htdemucs-4s',
-    label: 'HTDemucs 4s (WebGPU)',
-    description: 'ONNX モデル。WebGPU 対応デバイスで高速化。ボーカル・ドラム・ベース・その他 (drums/bass/other/vocals)',
-    sizeMB: 304,
-    // smank/htdemucs-onnx on HuggingFace (MIT license)
-    url: 'https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs.onnx',
-    cacheKey: 'htdemucs.onnx',
-    stemCount: 4,
-    // segment = 39/5 s × 44100 Hz = 343980
-    chunkSamples: 343_980,
-  },
-];
-
+/** App settings */
 export interface AppSettings {
   skipDuration: number; // seconds
   defaultSpeed: number;
   defaultPitch: number; // semitones
-  stemModel: StemModelId;
   /** Keep the screen awake even when not playing */
   keepAwake: boolean;
   /** modal.com API base URL (e.g. https://xxx--mimiqplayer-api.modal.run) */
@@ -184,7 +141,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skipDuration: 5,
   defaultSpeed: 1.0,
   defaultPitch: 0,
-  stemModel: 'htdemucs-6s',
   keepAwake: false,
   // Populated at build time via VITE_API_ENDPOINT / VITE_API_KEY env vars.
   // The user can override these in the Settings UI.

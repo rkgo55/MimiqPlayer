@@ -9,11 +9,7 @@ function loadSettings(): AppSettings {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored) as Partial<AppSettings & { stemModel: string }>;
-      // Migrate hdemucs-mmi-v3 (removed) → htdemucs-4s
-      if ((parsed.stemModel as string) === 'hdemucs-mmi-v3') {
-        parsed.stemModel = 'htdemucs-4s';
-      }
+      const parsed = JSON.parse(stored) as Partial<AppSettings>;
       // Build-time env vars always win; user cannot override via localStorage.
       parsed.apiEndpoint = DEFAULT_SETTINGS.apiEndpoint;
       if (!parsed.apiKey) parsed.apiKey = DEFAULT_SETTINGS.apiKey;

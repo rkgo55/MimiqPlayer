@@ -18,15 +18,6 @@ vi.mock('../../storage/db', () => ({
   deleteProcessingState: (...args: unknown[]) => mockDeleteProcessingState(...args),
 }));
 
-const mockAnalyzeAudioInWorker     = vi.fn();
-const mockAnalyzeStructureInWorker = vi.fn();
-
-vi.mock('../../audio/AudioAnalysisWorkerClient.js', () => ({
-  analyzeAudioInWorker:     (...args: unknown[]) => mockAnalyzeAudioInWorker(...args),
-  analyzeStructureInWorker: (...args: unknown[]) => mockAnalyzeStructureInWorker(...args),
-  warmupAudioAnalysisWorker: vi.fn(),
-}));
-
 const mockApiAnalyze            = vi.fn();
 const mockApiAnalyzeStructure   = vi.fn();
 const mockApiAnalyzeStructureWithStems = vi.fn();
@@ -41,7 +32,7 @@ vi.mock('../../audio/apiClient', () => ({
 
 vi.mock('../settingsStore', () => ({
   settingsStore: {
-    subscribe: (cb: (v: unknown) => void) => { cb({ apiEndpoint: '', apiKey: '' }); return () => {}; },
+    subscribe: (cb: (v: unknown) => void) => { cb({ apiEndpoint: 'https://api.example.com', apiKey: 'test-key' }); return () => {}; },
   },
 }));
 
@@ -256,7 +247,7 @@ describe('analyzeTrack()', () => {
 
   it('does nothing when no track is loaded', async () => {
     await playerStore.analyzeTrack();
-    expect(mockAnalyzeAudioInWorker).not.toHaveBeenCalled();
+    expect(mockApiAnalyze).not.toHaveBeenCalled();
   });
 
   it('uses cached results without calling worker when cache is current', async () => {
@@ -294,12 +285,12 @@ describe('analyzeTrack()', () => {
     } as unknown as typeof AudioContext;
 
     await playerStore.loadTrack('track-x');
-    mockAnalyzeAudioInWorker.mockResolvedValue({ bpm: 99, key: 'X', chords: [] });
+    mockApiAnalyze.mockResolvedValue({ bpm: 99, key: 'X', chords: [], beats: [], key_confidence: 0.9, elapsed_seconds: 1 });
 
     await playerStore.analyzeTrack();
 
-    // Should NOT call worker since cache is valid
-    expect(mockAnalyzeAudioInWorker).not.toHaveBeenCalled();
+    // Should NOT call API since cache is valid
+    expect(mockApiAnalyze).not.toHaveBeenCalled();
     expect(get(playerStore.bpm)).toBe(120);
     expect(get(playerStore.key)).toBe('C メジャー');
   });
@@ -328,12 +319,12 @@ describe('analyzeTrack()', () => {
     } as unknown as typeof AudioContext;
 
     await playerStore.loadTrack('track-y');
-    mockAnalyzeAudioInWorker.mockResolvedValue({ bpm: 130, key: 'D マイナー', chords: [{ time: 0, chord: 'Dm' }] });
+    mockApiAnalyze.mockResolvedValue({ bpm: 130, key: 'D マイナー', chords: [{ time: 0, chord: 'Dm' }], beats: [], key_confidence: 0.9, elapsed_seconds: 1 });
 
     await playerStore.analyzeTrack();
 
-    // Worker should have been called once
-    expect(mockAnalyzeAudioInWorker).toHaveBeenCalledOnce();
+    // API should have been called once
+    expect(mockApiAnalyze).toHaveBeenCalledOnce();
     expect(get(playerStore.bpm)).toBe(130);
     expect(mockSaveTrackMeta).toHaveBeenCalled();
     expect(mockDeleteProcessingState).toHaveBeenCalledWith('track-y:analyze');
@@ -342,9 +333,9 @@ describe('analyzeTrack()', () => {
   it('per-track guard: concurrent calls fire only once', async () => {
     mockGetTrackMeta.mockResolvedValue({ id: 'track-z', analysisVersion: undefined });
     mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
-    let resolveWorker!: (v: { bpm: number; key: string; chords: never[] }) => void;
-    const slowWorker = new Promise<{ bpm: number; key: string; chords: never[] }>((res) => { resolveWorker = res; });
-    mockAnalyzeAudioInWorker.mockReturnValue(slowWorker);
+    let resolveWorker!: (v: { bpm: number; key: string; chords: never[]; beats: never[]; key_confidence: number; elapsed_seconds: number }) => void;
+    const slowWorker = new Promise<{ bpm: number; key: string; chords: never[]; beats: never[]; key_confidence: number; elapsed_seconds: number }>((res) => { resolveWorker = res; });
+    mockApiAnalyze.mockReturnValue(slowWorker);
 
     const mockDecode3 = vi.fn().mockResolvedValue({
       duration: 5, length: 220500, sampleRate: 44100, numberOfChannels: 1,
@@ -367,17 +358,17 @@ describe('analyzeTrack()', () => {
     const p1 = playerStore.analyzeTrack();
     const p2 = playerStore.analyzeTrack(); // should be blocked by guard
 
-    resolveWorker({ bpm: 110, key: 'E', chords: [] });
+    resolveWorker({ bpm: 110, key: 'E', chords: [], beats: [], key_confidence: 0.9, elapsed_seconds: 1 });
     await Promise.all([p1, p2]);
 
-    // Worker called only once despite two concurrent calls
-    expect(mockAnalyzeAudioInWorker).toHaveBeenCalledOnce();
+    // API called only once despite two concurrent calls
+    expect(mockApiAnalyze).toHaveBeenCalledOnce();
   });
 
   it('saves processingState on start and deletes on completion', async () => {
     mockGetTrackMeta.mockResolvedValue({ id: 'track-ps', analysisVersion: undefined });
     mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
-    mockAnalyzeAudioInWorker.mockResolvedValue({ bpm: 100, key: 'F', chords: [] });
+    mockApiAnalyze.mockResolvedValue({ bpm: 100, key: 'F', chords: [], beats: [], key_confidence: 0.9, elapsed_seconds: 1 });
     const mockDecode4 = vi.fn().mockResolvedValue({
       duration: 5, length: 220500, sampleRate: 44100, numberOfChannels: 1,
       getChannelData: () => new Float32Array(220500),
@@ -434,8 +425,8 @@ describe('autoBookmarks()', () => {
     await playerStore.loadTrack('track-struct');
     await playerStore.autoBookmarks();
 
-    // Should use cache; worker not called
-    expect(mockAnalyzeStructureInWorker).not.toHaveBeenCalled();
+    // Should use cache; API not called
+    expect(mockApiAnalyzeStructure).not.toHaveBeenCalled();
     // Bookmarks generated from cached segments
     const bms = get(playerStore.bookmarks);
     expect(bms).toHaveLength(2);
@@ -461,15 +452,18 @@ describe('autoBookmarks()', () => {
       close() { return Promise.resolve(); }
     } as unknown as typeof AudioContext;
 
-    mockAnalyzeStructureInWorker.mockResolvedValue([
-      { start: 0, end: 20 },
-      { start: 20, end: 60 },
-    ]);
+    mockApiAnalyzeStructure.mockResolvedValue({
+      segments: [{ start: 0, end: 20, label: '' }, { start: 20, end: 60, label: '' }],
+      bookmarks: [{ id: 'auto-0', label: '', a: 0, b: 20 }, { id: 'auto-1', label: '', a: 20, b: 60 }],
+      beats: [],
+      downbeats: [],
+      elapsed_seconds: 1,
+    });
 
     await playerStore.loadTrack('track-struct2');
     await playerStore.autoBookmarks();
 
-    expect(mockAnalyzeStructureInWorker).toHaveBeenCalledOnce();
+    expect(mockApiAnalyzeStructure).toHaveBeenCalledOnce();
     // Bookmarks created from segments
     const bms = get(playerStore.bookmarks);
     expect(bms).toHaveLength(2);

@@ -4,11 +4,10 @@
   import { trackStore } from './lib/stores/trackStore';
   import { playerStore, isAnyProcessingActive } from './lib/stores/playerStore';
   import { stemStore } from './lib/stores/stemStore';
+  import Settings from './lib/components/Settings.svelte';
   import FileUpload from './lib/components/FileUpload.svelte';
   import TrackList from './lib/components/TrackList.svelte';
   import Player from './lib/components/Player.svelte';
-  import Settings from './lib/components/Settings.svelte';
-  import { warmupAudioAnalysisWorker } from './lib/audio/AudioAnalysisWorkerClient.js';
   import { getStaleProcessingStates, deleteProcessingState, getProcessingState } from './lib/storage/db';
 
   import { settingsStore } from './lib/stores/settingsStore';
@@ -17,7 +16,6 @@
 
   onMount(async () => {
     await trackStore.load();
-    warmupAudioAnalysisWorker();
 
     // Restore the previously selected track from the URL hash
     const hash = window.location.hash.slice(1); // strip leading '#'

@@ -26,7 +26,7 @@
   let zoomOffset = $state(0); // 0..1 fraction of total duration at left edge
 
   // Pointer interaction
-  type DragTarget = 'seek' | 'pan' | 'trimStart' | 'trimEnd' | 'abA' | 'abB' | null;
+  type DragTarget = 'seek' | 'pan' | 'playhead' | 'trimStart' | 'trimEnd' | 'abA' | 'abB' | null;
   let dragTarget = $state<DragTarget>(null);
   let activePointerId: number | null = $state(null);
   let hoverTarget = $state<HandleTarget | null>(null);
@@ -153,14 +153,7 @@
       drawTrimHandle(ctx, timeToX(_trimEnd ?? duration, w), h, true);
     }
 
-    // ── Zoom minimap bar (bottom) ─────────────────────────────────────────
-    if (zoomLevel > 1) {
-      const mh = 3;
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.fillRect(0, h - mh, w, mh);
-      ctx.fillStyle = 'rgba(99,102,241,0.55)';
-      ctx.fillRect(visStart * w, h - mh, (visEnd - visStart) * w, mh);
-    }
+
   }
 
   /** A/B handle: triangle tab at top of canvas + vertical line */
@@ -202,7 +195,7 @@
   const TRIM_HIT_PX = 14;
   const AB_HIT_PX = 10;
 
-  type HandleTarget = 'trimStart' | 'trimEnd' | 'abA' | 'abB';
+  type HandleTarget = 'playhead' | 'trimStart' | 'trimEnd' | 'abA' | 'abB';
   function hitTest(x: number, w: number): HandleTarget | null {
     const dur = waveformData?.duration ?? 0;
     if (dur <= 0) return null;
@@ -215,6 +208,8 @@
     const { abRepeat } = playerState;
     if (abRepeat.b !== null && Math.abs(x - timeToX(abRepeat.b, w)) <= AB_HIT_PX) return 'abB';
     if (abRepeat.a !== null && Math.abs(x - timeToX(abRepeat.a, w)) <= AB_HIT_PX) return 'abA';
+    // Playhead (only when zoomed so tap-to-seek at zoom=1 is unaffected)
+    if (zoomLevel > 1 && Math.abs(x - timeToX(playerState.currentTime, w)) <= AB_HIT_PX) return 'playhead';
     return null;
   }
 
@@ -245,19 +240,12 @@
       return;
     }
 
-    // No handle hit
-    if (zoomLevel > 1) {
-      // Drag-to-pan mode: don't seek until we confirm it's a tap
-      dragTarget = 'pan';
-      activePointerId = e.pointerId;
-      panStartX = e.clientX;
-      panStartOffset = zoomOffset;
-      hasPanned = false;
-    } else {
-      dragTarget = 'seek';
-      activePointerId = e.pointerId;
-      seekFromClientX(e.clientX);
-    }
+    // No handle hit — always use tap-to-seek / drag-to-pan pattern
+    dragTarget = 'pan';
+    activePointerId = e.pointerId;
+    panStartX = e.clientX;
+    panStartOffset = zoomOffset;
+    hasPanned = false;
   }
 
   function handlePointerMove(e: PointerEvent) {
@@ -311,6 +299,10 @@
     const t = xToTime(x, rect.width);
     const dur = waveformData?.duration ?? 0;
     const MIN_GAP = 0.05;
+    if (dragTarget === 'playhead') {
+      playerStore.seek(t);
+      return;
+    }
     if (dragTarget === 'trimStart') {
       trimStartStore.set(Math.max(0, Math.min(t, (_trimEnd ?? dur) - MIN_GAP)));
     } else if (dragTarget === 'trimEnd') {
@@ -368,35 +360,97 @@
   }
 
   const isHandleDrag = $derived(
+    dragTarget === 'playhead' ||
     dragTarget === 'trimStart' || dragTarget === 'trimEnd' ||
     dragTarget === 'abA' || dragTarget === 'abB'
   );
   const isHandleHover = $derived(
+    hoverTarget === 'playhead' ||
     hoverTarget === 'trimStart' || hoverTarget === 'trimEnd' ||
     hoverTarget === 'abA' || hoverTarget === 'abB'
   );
   const isPanMode = $derived(dragTarget === 'pan' && hasPanned);
+
+  // Scrollbar
+  let scrollbarTrack: HTMLDivElement = $state(null!);
+  let scrollbarDragging = false;
+  let scrollbarStartX = 0;
+  let scrollbarStartOffset = 0;
+
+  const scrollThumbLeft = $derived(zoomOffset * 100);
+  const scrollThumbWidth = $derived((1 / zoomLevel) * 100);
+
+  function handleScrollbarDown(e: PointerEvent) {
+    e.stopPropagation();
+    const rect = scrollbarTrack.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const frac = x / rect.width;
+    const rangeFrac = 1 / zoomLevel;
+    zoomOffset = Math.max(0, Math.min(1 - rangeFrac, frac - rangeFrac / 2));
+    scrollbarDragging = true;
+    scrollbarStartX = e.clientX;
+    scrollbarStartOffset = zoomOffset;
+    scrollbarTrack.setPointerCapture(e.pointerId);
+    requestAnimationFrame(draw);
+  }
+
+  function handleScrollbarMove(e: PointerEvent) {
+    if (!scrollbarDragging) return;
+    const rect = scrollbarTrack.getBoundingClientRect();
+    const dx = e.clientX - scrollbarStartX;
+    const rangeFrac = 1 / zoomLevel;
+    zoomOffset = Math.max(0, Math.min(1 - rangeFrac, scrollbarStartOffset + dx / rect.width));
+    requestAnimationFrame(draw);
+  }
+
+  function handleScrollbarUp() {
+    scrollbarDragging = false;
+  }
 </script>
 
-<div
-  bind:this={container}
-  class="relative w-full h-20 rounded-lg overflow-hidden bg-surface-light touch-none"
-  class:cursor-pointer={!isHandleDrag && !isHandleHover && !isPanMode}
-  class:cursor-ew-resize={isHandleDrag || isHandleHover}
-  class:cursor-grab={!isHandleDrag && !isHandleHover && !isPanMode && zoomLevel > 1}
-  class:cursor-grabbing={isPanMode}
-  role="slider"
-  tabindex="0"
-  aria-label="再生位置"
-  aria-valuemin={0}
-  aria-valuemax={playerState.duration}
-  aria-valuenow={playerState.currentTime}
-  onpointerdown={handlePointerDown}
-  onpointermove={handlePointerMove}
-  onpointerup={handlePointerUp}
-  onpointercancel={handlePointerUp}
-  onwheel={handleWheel}
->
-  <canvas bind:this={canvas} class="w-full h-full"></canvas>
+<div class="w-full">
+  <div
+    bind:this={container}
+    class="relative w-full h-20 rounded-lg overflow-hidden bg-surface-light touch-none"
+    class:cursor-pointer={!isHandleDrag && !isHandleHover && !isPanMode}
+    class:cursor-ew-resize={isHandleDrag || isHandleHover}
+    class:cursor-grab={!isHandleDrag && !isHandleHover && !isPanMode && zoomLevel > 1}
+    class:cursor-grabbing={isPanMode}
+    role="slider"
+    tabindex="0"
+    aria-label="再生位置"
+    aria-valuemin={0}
+    aria-valuemax={playerState.duration}
+    aria-valuenow={playerState.currentTime}
+    onpointerdown={handlePointerDown}
+    onpointermove={handlePointerMove}
+    onpointerup={handlePointerUp}
+    onpointercancel={handlePointerUp}
+    onwheel={handleWheel}
+  >
+    <canvas id="waveform-canvas" bind:this={canvas} class="w-full h-full"></canvas>
+  </div>
+  {#if zoomLevel > 1}
+  <div
+    bind:this={scrollbarTrack}
+    class="relative w-full h-2 mt-1 rounded-full bg-surface-light overflow-hidden cursor-pointer touch-none"
+    onpointerdown={handleScrollbarDown}
+    onpointermove={handleScrollbarMove}
+    onpointerup={handleScrollbarUp}
+    onpointercancel={handleScrollbarUp}
+    role="scrollbar"
+    aria-controls="waveform-canvas"
+    aria-orientation="horizontal"
+    aria-valuenow={scrollThumbLeft}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    tabindex="-1"
+  >
+    <div
+      class="absolute h-full rounded-full bg-indigo-500/60 hover:bg-indigo-500/80 transition-colors"
+      style="left: {scrollThumbLeft}%; width: {scrollThumbWidth}%"
+    ></div>
+  </div>
+  {/if}
 </div>
 

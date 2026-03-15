@@ -4,10 +4,8 @@ import { EQ_FLAT } from '../types';
 import { AudioEngine } from '../audio/AudioEngine';
 import { getAudioFile, saveAudioFile, getTrackMeta, saveTrackMeta, getStemFile, saveProcessingState, deleteProcessingState, deleteStemFiles } from '../storage/db';
 import { extractWaveformData } from '../audio/WaveformAnalyzer';
-import { analyzeAudioInWorker, analyzeStructureInWorker } from '../audio/AudioAnalysisWorkerClient.js';
 import { ANALYSIS_CACHE_VERSION } from '../audio/analysisConfig.js';
-import type { WaveformData } from '../types';
-import type { ChordInfo } from '../audio/AudioAnalyzer';
+import type { WaveformData, ChordInfo } from '../types';
 import { settingsStore } from './settingsStore';
 import { getApiClient, type StructureResponse } from '../audio/apiClient';
 import { encodeWavStereo16 } from '../audio/wavUtils';
@@ -372,20 +370,18 @@ function createPlayerStore() {
           const audioBuffer = _currentAudioBuffer;
 
           let result: { bpm: number; key: string; chords: ChordInfo[] };
-          if (apiSettings.apiEndpoint) {
-            if (_currentAudioBuffer && _currentAudioBuffer.duration > 600) {
-              throw new Error(AI_DURATION_LIMIT_ERROR);
-            }
-            const audioFile = await getAudioFile(currentTrackId);
-            if (!audioFile) return;
-            const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
-            const contentHash = cachedMeta?.contentHash;
-            const res = await client.analyze(audioFile.data, contentHash);
-            result = { bpm: res.bpm, key: res.key, chords: res.chords as ChordInfo[] };
-          } else {
-            if (!audioBuffer) return;
-            result = await analyzeAudioInWorker(audioBuffer);
+          if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
+            throw new Error('APIが設定されていません');
           }
+          if (_currentAudioBuffer && _currentAudioBuffer.duration > 600) {
+            throw new Error(AI_DURATION_LIMIT_ERROR);
+          }
+          const audioFile = await getAudioFile(currentTrackId);
+          if (!audioFile) return;
+          const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
+          const contentHash = cachedMeta?.contentHash;
+          const res = await client.analyze(audioFile.data, contentHash);
+          result = { bpm: res.bpm, key: res.key, chords: res.chords as ChordInfo[] };
 
           if (get({ subscribe }).trackId !== currentTrackId) return;
 
@@ -409,88 +405,6 @@ function createPlayerStore() {
       } finally {
         _analyzingTracks.delete(currentTrackId);
         analyzingTrackId.set(null);
-      }
-    },
-
-    /**
-     * Re-run audio analysis using a stem mix optimised for harmony.
-     * Uses: bass (x1.0) + piano (x0.5) + guitar (x0.5), or vocals if those
-     * stems are unavailable (4-stem model).
-     * Called after stem separation for more accurate chord / key analysis.
-     */
-    async reAnalyzeWithStem(
-      trackId: string,
-      stems: Partial<Record<string, ArrayBuffer>>,
-    ): Promise<void> {
-      const isCurrentTrack = () => get({ subscribe }).trackId === trackId;
-      if (!isCurrentTrack()) return;
-
-      // Build a harmony-focused mix: bass + piano 50% + guitar 50%
-      // Fallback to vocals if the 6-stem mix is not available.
-      const harmonyStemBuffers: Array<{ buf: ArrayBuffer; gain: number }> = [];
-      if (stems.bass)   harmonyStemBuffers.push({ buf: stems.bass,   gain: 1.0 });
-      if (stems.piano)  harmonyStemBuffers.push({ buf: stems.piano,  gain: 0.5 });
-      if (stems.guitar) harmonyStemBuffers.push({ buf: stems.guitar, gain: 0.5 });
-
-      // Fall back to vocals if no harmony stems are present (4-stem model)
-      const fallbackBuf = harmonyStemBuffers.length === 0 ? stems.vocals : null;
-      const wavBuf = fallbackBuf ?? null;
-
-      let stemBuffer: AudioBuffer;
-      const ctx = new AudioContext();
-      try {
-        if (harmonyStemBuffers.length > 0) {
-          // Decode each stem (OGG from API or WAV from browser worker) via AudioContext
-          // then mix them into a single AudioBuffer with per-stem gain.
-          const decoded = await Promise.all(
-            harmonyStemBuffers.map(async ({ buf, gain }) => {
-              const ab = await ctx.decodeAudioData(buf.slice(0));
-              return { ab, gain };
-            })
-          );
-          const length = decoded[0].ab.length;
-          const mixLeft  = new Float32Array(length);
-          const mixRight = new Float32Array(length);
-          for (const { ab, gain } of decoded) {
-            const ch0 = ab.getChannelData(0);
-            const ch1 = ab.numberOfChannels > 1 ? ab.getChannelData(1) : ch0;
-            for (let i = 0; i < length; i++) {
-              mixLeft[i]  += ch0[i] * gain;
-              mixRight[i] += ch1[i] * gain;
-            }
-          }
-          const sr = decoded[0].ab.sampleRate;
-          stemBuffer = ctx.createBuffer(2, length, sr);
-          stemBuffer.copyToChannel(mixLeft,  0);
-          stemBuffer.copyToChannel(mixRight, 1);
-        } else if (wavBuf) {
-          stemBuffer = await ctx.decodeAudioData(wavBuf.slice(0));
-        } else {
-          return; // no usable stems
-        }
-      } finally {
-        await ctx.close();
-      }
-
-      if (!isCurrentTrack()) return;
-
-      const detected = await analyzeAudioInWorker(stemBuffer);
-      if (!isCurrentTrack()) return;
-
-      bpm.set(detected.bpm);
-      key.set(detected.key);
-      chords.set(detected.chords);
-
-      // Overwrite cached analysis with stem-based results
-      const meta = await getTrackMeta(trackId);
-      if (meta) {
-        await saveTrackMeta({
-          ...meta,
-          analysisVersion: ANALYSIS_CACHE_VERSION,
-          bpm: detected.bpm,
-          key: detected.key,
-          chords: detected.chords,
-        });
       }
     },
 
@@ -679,16 +593,17 @@ function createPlayerStore() {
         await saveProcessingState({ id: `${trackId}:structure`, trackId, tool: 'structure', startedAt: Date.now() });
         try {
         const apiSettings = get(settingsStore);
-        const apiAvailable = !!apiSettings.apiEndpoint;
 
         let generated: LoopBookmark[];
         let structureSegments: { start: number; end: number; label: string }[];
 
-        if (apiAvailable) {
-          if (_currentAudioBuffer && _currentAudioBuffer.duration > 600) {
-            throw new Error(AI_DURATION_LIMIT_ERROR);
-          }
-          // Server-side: allin1 returns functional labels (verse, chorus, …)
+        if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
+          throw new Error('APIが設定されていません');
+        }
+        if (_currentAudioBuffer && _currentAudioBuffer.duration > 600) {
+          throw new Error(AI_DURATION_LIMIT_ERROR);
+        }
+        // Server-side: allin1 returns functional labels (verse, chorus, …)
           const audioFile = await getAudioFile(trackId);
           if (!audioFile) return;
           const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
@@ -713,21 +628,6 @@ function createPlayerStore() {
           }
           generated = res.bookmarks;
           structureSegments = res.segments;
-        } else {
-          // Browser-side fallback: boundary detection only, generic labels
-          const segments = await analyzeStructureInWorker(_currentAudioBuffer);
-          structureSegments = segments.map((seg, i) => ({
-            start: seg.start,
-            end: seg.end,
-            label: `セクション ${i + 1}`,
-          }));
-          generated = structureSegments.map((seg) => ({
-            id: `auto-${seg.start.toFixed(2)}`,
-            label: seg.label,
-            a: seg.start,
-            b: seg.end,
-          }));
-        }
 
         if (get({ subscribe }).trackId !== trackId) return;
         const manual = get(bookmarks).filter((b) => !b.id.startsWith(AUTO_PREFIX));
