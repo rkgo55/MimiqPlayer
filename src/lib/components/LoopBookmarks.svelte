@@ -201,6 +201,7 @@
             class="space-y-1 transition-opacity {dragFromIndex === i ? 'opacity-40' : 'opacity-100'}"
             data-bm-index={i}
             draggable="true"
+            role="listitem"
             ondragstart={() => onDragStart(i)}
             ondragover={(e) => onDragOver(e, i)}
             ondrop={() => onDrop(i)}
@@ -214,6 +215,9 @@
               <!-- drag handle (mouse + touch) -->
               <span
                 class="flex-shrink-0 cursor-grab active:cursor-grabbing text-text-muted/30 hover:text-text-muted/60 select-none"
+                role="button"
+                tabindex="0"
+                aria-label="ドラッグして並び替え"
                 ontouchstart={(e) => onTouchStart(e, i)}
                 ontouchend={onTouchEnd}
               >
