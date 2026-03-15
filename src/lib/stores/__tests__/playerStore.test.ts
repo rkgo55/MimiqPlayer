@@ -1,10 +1,48 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 
+const mockGetTrackMeta  = vi.fn().mockResolvedValue(undefined);
+const mockSaveTrackMeta = vi.fn().mockResolvedValue(undefined);
+const mockSaveProcessingState   = vi.fn().mockResolvedValue(undefined);
+const mockDeleteProcessingState = vi.fn().mockResolvedValue(undefined);
+const mockGetAudioFile = vi.fn().mockResolvedValue(null);
+
 // Mock external dependencies before importing playerStore
 vi.mock('../../storage/db', () => ({
-  getAudioFile: vi.fn().mockResolvedValue(null),
-  getAllTracks: vi.fn().mockResolvedValue([]),
+  getAudioFile:          (...args: unknown[]) => mockGetAudioFile(...args),
+  getAllTracks:           vi.fn().mockResolvedValue([]),
+  getTrackMeta:          (...args: unknown[]) => mockGetTrackMeta(...args),
+  saveTrackMeta:         (...args: unknown[]) => mockSaveTrackMeta(...args),
+  getStemFile:           vi.fn().mockResolvedValue(undefined),
+  saveProcessingState:   (...args: unknown[]) => mockSaveProcessingState(...args),
+  deleteProcessingState: (...args: unknown[]) => mockDeleteProcessingState(...args),
+}));
+
+const mockAnalyzeAudioInWorker     = vi.fn();
+const mockAnalyzeStructureInWorker = vi.fn();
+
+vi.mock('../../audio/AudioAnalysisWorkerClient.js', () => ({
+  analyzeAudioInWorker:     (...args: unknown[]) => mockAnalyzeAudioInWorker(...args),
+  analyzeStructureInWorker: (...args: unknown[]) => mockAnalyzeStructureInWorker(...args),
+  warmupAudioAnalysisWorker: vi.fn(),
+}));
+
+const mockApiAnalyze            = vi.fn();
+const mockApiAnalyzeStructure   = vi.fn();
+const mockApiAnalyzeStructureWithStems = vi.fn();
+
+vi.mock('../../audio/apiClient', () => ({
+  getApiClient: vi.fn().mockReturnValue({
+    analyze:                   (...args: unknown[]) => mockApiAnalyze(...args),
+    analyzeStructure:          (...args: unknown[]) => mockApiAnalyzeStructure(...args),
+    analyzeStructureWithStems: (...args: unknown[]) => mockApiAnalyzeStructureWithStems(...args),
+  }),
+}));
+
+vi.mock('../settingsStore', () => ({
+  settingsStore: {
+    subscribe: (cb: (v: unknown) => void) => { cb({ apiEndpoint: '', apiKey: '' }); return () => {}; },
+  },
 }));
 
 vi.mock('../../audio/WaveformAnalyzer', () => ({
@@ -71,6 +109,13 @@ function seedTime(time: number) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  // Restore default resolved values after clearAllMocks
+  mockGetTrackMeta.mockResolvedValue(undefined);
+  mockSaveTrackMeta.mockResolvedValue(undefined);
+  mockSaveProcessingState.mockResolvedValue(undefined);
+  mockDeleteProcessingState.mockResolvedValue(undefined);
+  mockGetAudioFile.mockResolvedValue(null);
   playerStore.stop();
   playerStore.clearAB();
 });
@@ -200,5 +245,242 @@ describe('setPitch()', () => {
   it('updates pitch in store', () => {
     playerStore.setPitch(-3);
     expect(getState().pitch).toBe(-3);
+  });
+});
+
+// ──────────────────────────────────────────────
+// analyzeTrack() — per-track guard & cache
+// ──────────────────────────────────────────────
+describe('analyzeTrack()', () => {
+  const ANALYSIS_CACHE_VERSION = 2; // matches analysisConfig.ts
+
+  it('does nothing when no track is loaded', async () => {
+    await playerStore.analyzeTrack();
+    expect(mockAnalyzeAudioInWorker).not.toHaveBeenCalled();
+  });
+
+  it('uses cached results without calling worker when cache is current', async () => {
+    // Simulate a loaded track by manually updating trackId
+    playerStore.seek(0); // keeps trackId null — need set via loadTrack stub
+    // Directly test via getTrackMeta returning valid cache
+    mockGetTrackMeta.mockResolvedValue({
+      id: 'track-x',
+      analysisVersion: ANALYSIS_CACHE_VERSION,
+      bpm: 120,
+      key: 'C メジャー',
+      chords: [{ time: 0, chord: 'C' }],
+    });
+
+    // Load a track stub to set trackId
+    mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
+    const mockDecode = vi.fn().mockResolvedValue({
+      duration: 10,
+      length: 441000,
+      sampleRate: 44100,
+      numberOfChannels: 2,
+      getChannelData: () => new Float32Array(441000),
+    });
+    globalThis.AudioContext = class {
+      state = 'running';
+      destination = {};
+      currentTime = 0;
+      audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+      decodeAudioData = mockDecode;
+      createGain() { return { gain: { value: 1 }, connect() {} }; }
+      createAnalyser() { return { fftSize: 2048, frequencyBinCount: 1024, connect() {}, getByteFrequencyData() {} }; }
+      createBufferSource() { return { buffer: null, playbackRate: { value: 1 }, onended: null, connect() {}, disconnect() {}, start() {}, stop() {} }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+
+    await playerStore.loadTrack('track-x');
+    mockAnalyzeAudioInWorker.mockResolvedValue({ bpm: 99, key: 'X', chords: [] });
+
+    await playerStore.analyzeTrack();
+
+    // Should NOT call worker since cache is valid
+    expect(mockAnalyzeAudioInWorker).not.toHaveBeenCalled();
+    expect(get(playerStore.bpm)).toBe(120);
+    expect(get(playerStore.key)).toBe('C メジャー');
+  });
+
+  it('calls worker and saves result when no cache', async () => {
+    mockGetTrackMeta.mockResolvedValue({ id: 'track-y', analysisVersion: undefined });
+    mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
+    const mockDecode2 = vi.fn().mockResolvedValue({
+      duration: 5,
+      length: 220500,
+      sampleRate: 44100,
+      numberOfChannels: 1,
+      getChannelData: () => new Float32Array(220500),
+    });
+    globalThis.AudioContext = class {
+      state = 'running';
+      destination = {};
+      currentTime = 0;
+      audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+      decodeAudioData = mockDecode2;
+      createGain() { return { gain: { value: 1 }, connect() {} }; }
+      createAnalyser() { return { fftSize: 2048, frequencyBinCount: 1024, connect() {}, getByteFrequencyData() {} }; }
+      createBufferSource() { return { buffer: null, playbackRate: { value: 1 }, onended: null, connect() {}, disconnect() {}, start() {}, stop() {} }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+
+    await playerStore.loadTrack('track-y');
+    mockAnalyzeAudioInWorker.mockResolvedValue({ bpm: 130, key: 'D マイナー', chords: [{ time: 0, chord: 'Dm' }] });
+
+    await playerStore.analyzeTrack();
+
+    // Worker should have been called once
+    expect(mockAnalyzeAudioInWorker).toHaveBeenCalledOnce();
+    expect(get(playerStore.bpm)).toBe(130);
+    expect(mockSaveTrackMeta).toHaveBeenCalled();
+    expect(mockDeleteProcessingState).toHaveBeenCalledWith('track-y:analyze');
+  });
+
+  it('per-track guard: concurrent calls fire only once', async () => {
+    mockGetTrackMeta.mockResolvedValue({ id: 'track-z', analysisVersion: undefined });
+    mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
+    let resolveWorker!: (v: { bpm: number; key: string; chords: never[] }) => void;
+    const slowWorker = new Promise<{ bpm: number; key: string; chords: never[] }>((res) => { resolveWorker = res; });
+    mockAnalyzeAudioInWorker.mockReturnValue(slowWorker);
+
+    const mockDecode3 = vi.fn().mockResolvedValue({
+      duration: 5, length: 220500, sampleRate: 44100, numberOfChannels: 1,
+      getChannelData: () => new Float32Array(220500),
+    });
+    globalThis.AudioContext = class {
+      state = 'running'; destination = {}; currentTime = 0;
+      audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+      decodeAudioData = mockDecode3;
+      createGain() { return { gain: { value: 1 }, connect() {} }; }
+      createAnalyser() { return { fftSize: 2048, frequencyBinCount: 1024, connect() {}, getByteFrequencyData() {} }; }
+      createBufferSource() { return { buffer: null, playbackRate: { value: 1 }, onended: null, connect() {}, disconnect() {}, start() {}, stop() {} }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+
+    await playerStore.loadTrack('track-z');
+
+    // Fire two concurrent calls
+    const p1 = playerStore.analyzeTrack();
+    const p2 = playerStore.analyzeTrack(); // should be blocked by guard
+
+    resolveWorker({ bpm: 110, key: 'E', chords: [] });
+    await Promise.all([p1, p2]);
+
+    // Worker called only once despite two concurrent calls
+    expect(mockAnalyzeAudioInWorker).toHaveBeenCalledOnce();
+  });
+
+  it('saves processingState on start and deletes on completion', async () => {
+    mockGetTrackMeta.mockResolvedValue({ id: 'track-ps', analysisVersion: undefined });
+    mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
+    mockAnalyzeAudioInWorker.mockResolvedValue({ bpm: 100, key: 'F', chords: [] });
+    const mockDecode4 = vi.fn().mockResolvedValue({
+      duration: 5, length: 220500, sampleRate: 44100, numberOfChannels: 1,
+      getChannelData: () => new Float32Array(220500),
+    });
+    globalThis.AudioContext = class {
+      state = 'running'; destination = {}; currentTime = 0;
+      audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+      decodeAudioData = mockDecode4;
+      createGain() { return { gain: { value: 1 }, connect() {} }; }
+      createAnalyser() { return { fftSize: 2048, frequencyBinCount: 1024, connect() {}, getByteFrequencyData() {} }; }
+      createBufferSource() { return { buffer: null, playbackRate: { value: 1 }, onended: null, connect() {}, disconnect() {}, start() {}, stop() {} }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+
+    await playerStore.loadTrack('track-ps');
+    await playerStore.analyzeTrack();
+
+    expect(mockSaveProcessingState).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'track-ps:analyze', tool: 'analyze' })
+    );
+    expect(mockDeleteProcessingState).toHaveBeenCalledWith('track-ps:analyze');
+  });
+});
+
+// ──────────────────────────────────────────────
+// autoBookmarks() — per-track guard & structure cache
+// ──────────────────────────────────────────────
+describe('autoBookmarks()', () => {
+  it('uses cached structureSegments without calling worker', async () => {
+    mockGetTrackMeta.mockResolvedValue({
+      id: 'track-struct',
+      structureSegments: [
+        { start: 0, end: 30, label: 'イントロ' },
+        { start: 30, end: 90, label: 'サビ' },
+      ],
+    });
+    mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
+    const mockDecode5 = vi.fn().mockResolvedValue({
+      duration: 90, length: 90 * 44100, sampleRate: 44100, numberOfChannels: 2,
+      getChannelData: () => new Float32Array(90 * 44100),
+    });
+    globalThis.AudioContext = class {
+      state = 'running'; destination = {}; currentTime = 0;
+      audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+      decodeAudioData = mockDecode5;
+      createGain() { return { gain: { value: 1 }, connect() {} }; }
+      createAnalyser() { return { fftSize: 2048, frequencyBinCount: 1024, connect() {}, getByteFrequencyData() {} }; }
+      createBufferSource() { return { buffer: null, playbackRate: { value: 1 }, onended: null, connect() {}, disconnect() {}, start() {}, stop() {} }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+
+    await playerStore.loadTrack('track-struct');
+    await playerStore.autoBookmarks();
+
+    // Should use cache; worker not called
+    expect(mockAnalyzeStructureInWorker).not.toHaveBeenCalled();
+    // Bookmarks generated from cached segments
+    const bms = get(playerStore.bookmarks);
+    expect(bms).toHaveLength(2);
+    expect(bms[0].label).toBe('イントロ');
+    expect(bms[1].label).toBe('サビ');
+  });
+
+  it('calls worker, saves structureSegments, and sets bookmarks when no cache', async () => {
+    mockGetTrackMeta.mockResolvedValue({ id: 'track-struct2' });
+    mockGetAudioFile.mockResolvedValue({ data: new ArrayBuffer(4), mimeType: 'audio/mp3' });
+    const mockDecode6 = vi.fn().mockResolvedValue({
+      duration: 60, length: 60 * 44100, sampleRate: 44100, numberOfChannels: 2,
+      getChannelData: () => new Float32Array(60 * 44100),
+    });
+    globalThis.AudioContext = class {
+      state = 'running'; destination = {}; currentTime = 0;
+      audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+      decodeAudioData = mockDecode6;
+      createGain() { return { gain: { value: 1 }, connect() {} }; }
+      createAnalyser() { return { fftSize: 2048, frequencyBinCount: 1024, connect() {}, getByteFrequencyData() {} }; }
+      createBufferSource() { return { buffer: null, playbackRate: { value: 1 }, onended: null, connect() {}, disconnect() {}, start() {}, stop() {} }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    } as unknown as typeof AudioContext;
+
+    mockAnalyzeStructureInWorker.mockResolvedValue([
+      { start: 0, end: 20 },
+      { start: 20, end: 60 },
+    ]);
+
+    await playerStore.loadTrack('track-struct2');
+    await playerStore.autoBookmarks();
+
+    expect(mockAnalyzeStructureInWorker).toHaveBeenCalledOnce();
+    // Bookmarks created from segments
+    const bms = get(playerStore.bookmarks);
+    expect(bms).toHaveLength(2);
+    // structureSegments saved to meta
+    expect(mockSaveTrackMeta).toHaveBeenCalledWith(
+      expect.objectContaining({
+        structureSegments: expect.arrayContaining([
+          expect.objectContaining({ start: 0, end: 20 }),
+        ]),
+      })
+    );
+    expect(mockDeleteProcessingState).toHaveBeenCalledWith('track-struct2:structure');
   });
 });

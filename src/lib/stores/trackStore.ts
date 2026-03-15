@@ -22,8 +22,16 @@ function createTrackStore() {
       const id = `track-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const arrayBuffer = await file.arrayBuffer();
 
+      // Compute content hash (SHA-256, first 32 hex chars)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const contentHash = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 32);
+
       // Parse metadata
       const meta = await parseMetadata(file, id);
+      meta.contentHash = contentHash;
 
       // Save to IndexedDB
       await saveAudioFile(id, arrayBuffer, file.type);
@@ -65,6 +73,13 @@ function createTrackStore() {
       const { getTrackMeta } = await import('../storage/db');
       const meta = await getTrackMeta(id);
       if (meta) await saveTrackMeta({ ...meta, ...fields });
+    },
+
+    /** Reorder tracks and persist order to DB */
+    async reorder(ordered: TrackMeta[]) {
+      const updated = ordered.map((t, i) => ({ ...t, order: i }));
+      set(updated);
+      await Promise.all(updated.map((t) => saveTrackMeta(t)));
     },
   };
 }

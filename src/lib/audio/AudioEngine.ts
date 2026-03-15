@@ -234,6 +234,9 @@ export class AudioEngine {
         for (const src of this._stemSources) {
           src.playbackRate.value = this._speed;
         }
+        if (this.soundTouchNode) {
+          this.soundTouchNode.playbackRate.value = this._speed;
+        }
       } else if (this.sourceNode && this.soundTouchNode) {
         const current = this.currentTime;
         this.playbackStartedOffset = current;
@@ -427,10 +430,12 @@ export class AudioEngine {
       }
 
       // Insert SoundTouch after gainNode for pitch shifting.
-      // Speed is handled by source.playbackRate so ST playbackRate stays 1.0.
+      // Speed is handled both by source.playbackRate AND soundTouchNode.playbackRate
+      // (same pattern as normal mode) so that SoundTouch can pitch-correct the
+      // tape-speed change introduced by source.playbackRate.
       this.soundTouchNode = new SoundTouchNode(ctx);
       this.soundTouchNode.pitchSemitones.value = this._pitch;
-      this.soundTouchNode.playbackRate.value = 1.0;
+      this.soundTouchNode.playbackRate.value = this._speed;
       this.gainNode.connect(this.soundTouchNode);
       this.soundTouchNode.connect(this.eqFilters[0]);
     } else {

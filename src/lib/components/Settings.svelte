@@ -7,9 +7,10 @@
 
   let isOpen = $state(false);
   let storage = $state({ usedMB: 0, quotaMB: 0, ratio: 0 });
-  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-4s', keepAwake: false });
+  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-4s', keepAwake: false, apiEndpoint: '', apiKey: '' });
   const baseUrl = import.meta.env.BASE_URL;
-
+  const builtInEndpoint = import.meta.env.VITE_API_ENDPOINT ?? '';
+  const builtInApiKey = import.meta.env.VITE_API_KEY ?? '';
   settingsStore.subscribe((v) => (settings = v));
 
   async function openSettings() {
@@ -106,6 +107,34 @@
         </div>
       </div>
 
+      <!-- API settings -->
+      <div>
+        <span class="text-xs text-text-muted block mb-1.5">外部 API (Modal)</span>
+        <div class="space-y-1.5">
+          <div>
+            <label for="apiKey-input" class="text-[10px] text-text-muted block mb-0.5">
+              API Key（オプション）
+              {#if builtInApiKey}
+                <span class="ml-1 text-primary/70">(ビルド時設定済み)</span>
+              {/if}
+            </label>
+            <input
+              id="apiKey-input"
+              type="password"
+              placeholder={builtInApiKey ? '••••••••' : 'Bearer token (ローカルサーバーは不要)'}
+              value={settings.apiKey}
+              oninput={(e) => settingsStore.update((s) => ({ ...s, apiKey: (e.target as HTMLInputElement).value.trim() }))}
+              class="w-full text-[11px] bg-surface border border-surface-lighter rounded px-2 py-1 text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary"
+            />
+          </div>
+          {#if settings.apiEndpoint}
+            <p class="text-[10px] text-primary">✓ API 設定済み — トラック解析・ステム分離に使用されます</p>
+          {:else}
+            <p class="text-[10px] text-text-muted">未設定の場合はブラウザ内 AI を使用します</p>
+          {/if}
+        </div>
+      </div>
+
       <!-- Delete all -->
       <div>
         <button
@@ -114,19 +143,6 @@
         >
           すべてのトラックを削除
         </button>
-      </div>
-
-      <!-- Keyboard shortcuts info -->
-      <div>
-        <span class="text-xs text-text-muted block mb-1">キーボードショートカット</span>
-        <div class="text-[10px] text-text-muted space-y-0.5">
-          <div class="flex justify-between"><span>再生/一時停止</span><kbd class="bg-surface px-1 rounded">Space</kbd></div>
-          <div class="flex justify-between"><span>スキップ戻る</span><kbd class="bg-surface px-1 rounded">←</kbd></div>
-          <div class="flex justify-between"><span>スキップ進む</span><kbd class="bg-surface px-1 rounded">→</kbd></div>
-          <div class="flex justify-between"><span>A地点設定</span><kbd class="bg-surface px-1 rounded">A</kbd></div>
-          <div class="flex justify-between"><span>B地点設定</span><kbd class="bg-surface px-1 rounded">B</kbd></div>
-          <div class="flex justify-between"><span>A-Bリピート切替</span><kbd class="bg-surface px-1 rounded">R</kbd></div>
-        </div>
       </div>
 
       <!-- License info -->

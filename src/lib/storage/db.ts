@@ -1,8 +1,8 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import type { TrackMeta, StemType } from '../types';
+import type { TrackMeta, StemType, ProcessingState } from '../types';
 
 const DB_NAME = 'mimiqplayer-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 interface StemFileRecord {
   /** composite key: `${trackId}:${stem}` */
@@ -28,6 +28,10 @@ interface MimiqPlayerDB {
     value: StemFileRecord;
     indexes: { 'by-track': string };
   };
+  processingState: {
+    key: string;
+    value: ProcessingState;
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<MimiqPlayerDB>> | null = null;
@@ -47,6 +51,10 @@ function getDB(): Promise<IDBPDatabase<MimiqPlayerDB>> {
           const stemStore = db.createObjectStore('stemFiles', { keyPath: 'id' });
           stemStore.createIndex('by-track', 'trackId');
         }
+        // v3 → add processingState store
+        if (oldVersion < 3) {
+          db.createObjectStore('processingState', { keyPath: 'id' });
+        }
       },
     });
   }
@@ -59,11 +67,15 @@ export async function saveTrackMeta(meta: TrackMeta): Promise<void> {
   await db.put('tracks', meta);
 }
 
-/** Get all track metadata sorted by added time */
+/** Get all track metadata sorted by manual order, then by added time */
 export async function getAllTracks(): Promise<TrackMeta[]> {
   const db = await getDB();
-  const tracks = await db.getAllFromIndex('tracks', 'by-added');
-  return tracks.reverse();
+  const tracks = await db.getAll('tracks');
+  const hasOrder = tracks.some((t) => t.order !== undefined);
+  if (hasOrder) {
+    return tracks.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  }
+  return tracks.sort((a, b) => b.addedAt - a.addedAt);
 }
 
 /** Get a single track's metadata */
@@ -171,4 +183,37 @@ export async function deleteStemFiles(trackId: string): Promise<void> {
   const keys = await db.getAllKeysFromIndex('stemFiles', 'by-track', trackId);
   const tx = db.transaction('stemFiles', 'readwrite');
   await Promise.all([...keys.map((k) => tx.store.delete(k)), tx.done]);
+}
+
+// ─── Processing state helpers ───────────────────────────────────────────────
+
+/** Save an in-progress processing state entry */
+export async function saveProcessingState(state: ProcessingState): Promise<void> {
+  const db = await getDB();
+  await db.put('processingState', state);
+}
+
+/** Delete a processing state entry (on completion or error) */
+export async function deleteProcessingState(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('processingState', id);
+}
+
+/** Get a single processing state entry by id (returns undefined if not found) */
+export async function getProcessingState(id: string): Promise<ProcessingState | undefined> {
+  const db = await getDB();
+  return db.get('processingState', id);
+}
+
+/** Get all processing state entries */
+export async function getAllProcessingStates(): Promise<ProcessingState[]> {
+  const db = await getDB();
+  return db.getAll('processingState');
+}
+
+/** Get processing states that started more than `maxAgeMs` milliseconds ago */
+export async function getStaleProcessingStates(maxAgeMs: number): Promise<ProcessingState[]> {
+  const all = await getAllProcessingStates();
+  const cutoff = Date.now() - maxAgeMs;
+  return all.filter((s) => s.startedAt < cutoff);
 }

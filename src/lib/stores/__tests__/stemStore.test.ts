@@ -87,19 +87,32 @@ vi.mock('../../audio/wavUtils', () => ({
   decodeWavStereo16: () => ({ left: new Float32Array(100), right: new Float32Array(100) }),
 }));
 
-vi.mock('../playerStore', () => ({
-  playerStore: { engine: mockEngine, reAnalyzeWithStem: vi.fn().mockResolvedValue(undefined) },
-}));
+vi.mock('../playerStore', async () => {
+  // Writable store so get(playerStore) works; default trackId matches test tracks
+  const { writable } = await import('svelte/store');
+  const _inner = writable({ trackId: null as string | null });
+  const mockPS = {
+    engine: mockEngine,
+    reAnalyzeWithStem: vi.fn().mockResolvedValue(undefined),
+    subscribe: _inner.subscribe,
+    _setTrackId: (id: string | null) => _inner.set({ trackId: id }),
+  };
+  return { playerStore: mockPS, isAnyProcessingActive: vi.fn().mockReturnValue(false) };
+});
 
 vi.mock('../trackStore', () => ({
   trackStore: { updateStemStatus: vi.fn() },
 }));
 
 vi.mock('../../storage/db', () => ({
-  getTrackMeta:    (...args: unknown[]) => mockGetTrackMeta(...args),
-  saveTrackMeta:   (...args: unknown[]) => mockSaveTrackMeta(...args),
-  getAllStemFiles:  (...args: unknown[]) => mockGetAllStemFiles(...args),
-  saveStemFile:    (...args: unknown[]) => mockSaveStemFile(...args),
+  getTrackMeta:           (...args: unknown[]) => mockGetTrackMeta(...args),
+  saveTrackMeta:          (...args: unknown[]) => mockSaveTrackMeta(...args),
+  getAllStemFiles:         (...args: unknown[]) => mockGetAllStemFiles(...args),
+  saveStemFile:           (...args: unknown[]) => mockSaveStemFile(...args),
+  getAudioFile:           vi.fn().mockResolvedValue(null),
+  saveProcessingState:    vi.fn().mockResolvedValue(undefined),
+  deleteProcessingState:  vi.fn().mockResolvedValue(undefined),
+  getProcessingState:     vi.fn().mockResolvedValue(undefined),
 }));
 
 // OfflineAudioContext stub (for extractStereo44k in stemStore)
@@ -219,7 +232,11 @@ describe('stemStore', () => {
 
       const stems = fakeStems();
       mockSeparateFn.mockResolvedValue({ stems });
-
+      // loadStemsIntoEngine needs all stems to be present in storage
+      mockGetAllStemFiles.mockResolvedValue(stems);
+      Object.assign(mockEngine, { loadedStemTypes: ['vocals', 'drums', 'bass', 'other'] });      // Set the current trackId in the player mock so the guard allows engine load
+      const { playerStore: mockPS } = await import('../playerStore');
+      (mockPS as unknown as { _setTrackId: (id: string) => void })._setTrackId('track-4');
       // Trigger and wait
       const promise = stemStore.separate('track-4');
 
@@ -257,6 +274,47 @@ describe('stemStore', () => {
       await stemStore.separate('track-6');
 
       expect(mockSeparateFn).not.toHaveBeenCalled();
+    });
+
+    it('returns immediately if status is already processing (guard)', async () => {
+      // Prime a track so the store is in processing state
+      mockEngine.getAudioBuffer.mockReturnValue(
+        (() => {
+          const buf: AudioBuffer = {
+            numberOfChannels: 2, length: 44100, sampleRate: 44100, duration: 1,
+            getChannelData: () => new Float32Array(44100),
+            copyFromChannel: vi.fn(), copyToChannel: vi.fn(),
+          } as unknown as AudioBuffer;
+          return buf;
+        })()
+      );
+      mockGetTrackMeta.mockResolvedValue({ id: 'track-guard' });
+
+      // Hold the first separate() call in-flight
+      let resolveSep!: (v: { stems: Partial<Record<string, ArrayBuffer>> }) => void;
+      const inflight = new Promise<{ stems: Partial<Record<string, ArrayBuffer>> }>((res) => {
+        resolveSep = res;
+      });
+      mockSeparateFn.mockReturnValue(inflight);
+
+      const { playerStore: mockPS } = await import('../playerStore');
+      (mockPS as unknown as { _setTrackId: (id: string) => void })._setTrackId('track-guard');
+
+      const p1 = stemStore.separate('track-guard');
+      // Let microtasks run so status transitions to 'processing'
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Second call while still processing — should be a no-op
+      const p2 = stemStore.separate('track-guard');
+      await p2; // resolves immediately since guard fires
+
+      // Resolve the first call
+      resolveSep({ stems: {} });
+      await p1;
+
+      // separate was called only once
+      expect(mockSeparateFn).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -316,11 +374,16 @@ describe('stemStore', () => {
       } as unknown as AudioBuffer;
     }
 
-    beforeEach(() => {
+    beforeEach(async () => {
       mockEngine.getAudioBuffer.mockReturnValue(makeLongAudioBuffer());
       mockGetTrackMeta.mockResolvedValue({ id: 'track-parallel', title: 'Long Track', stemStatus: 'none' });
       mockSeparateFn.mockResolvedValue({ stems: fakeStems() });
       mockCreateNewSeparateFn.mockResolvedValue({ stems: fakeStems() });
+      mockGetAllStemFiles.mockResolvedValue(fakeStems());
+      Object.assign(mockEngine, { loadedStemTypes: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'] });
+      // Set trackId so the engine-load guard allows processing
+      const { playerStore: mockPS } = await import('../playerStore');
+      (mockPS as unknown as { _setTrackId: (id: string) => void })._setTrackId('track-parallel');
     });
 
     it('creates a new worker for the second segment', async () => {

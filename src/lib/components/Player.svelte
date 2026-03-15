@@ -1,8 +1,9 @@
 <script lang="ts">
   import { selectedTrack, trackStore } from '../stores/trackStore';
-  import { playerStore } from '../stores/playerStore';
+  import { playerStore, analyzingStructureTrackId as analyzingStructureTrackIdStore, trimStart as trimStartStore, trimEnd as trimEndStore, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
   import { stemStore, type StemState } from '../stores/stemStore';
+  import { get } from 'svelte/store';
   import Waveform from './Waveform.svelte';
   import Controls from './Controls.svelte';
   import SpeedPitch from './SpeedPitch.svelte';
@@ -16,7 +17,7 @@
   import { exportTrackAsZip, downloadBlob } from '../storage/trackExport';
 
   let track: TrackMeta | null = $state(null);
-  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-6s', keepAwake: false });
+  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-6s', keepAwake: false, apiEndpoint: '', apiKey: '' });
   let ps: PlayerState = $state({
     trackId: null, isPlaying: false, currentTime: 0, duration: 0,
     speed: 1, pitch: 0, volume: 1,
@@ -34,6 +35,15 @@
   let exportError = $state<string | null>(null);
   let showExportModal = $state(false);
 
+  // Audio cutter
+  let showTrimmer = $state(false);
+  let isTrimming = $state(false);
+  let _trimStart = $state(0);
+  let _trimEnd = $state<number | null>(null);
+  let autoBookmarksError = $state<string | null>(null);
+  trimStartStore.subscribe((v) => (_trimStart = v));
+  trimEndStore.subscribe((v) => (_trimEnd = v));
+
   const canSaveAB = $derived(ps.abRepeat.a !== null && ps.abRepeat.b !== null);
 
   function startEditTrackInfo() {
@@ -50,6 +60,33 @@
       artist: editArtist.trim(),
     });
     editingTrackInfo = false;
+  }
+
+  function formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  async function handleApplyTrim() {
+    if (isTrimming) return;
+    const start = _trimStart;
+    const end = _trimEnd ?? ps.duration;
+    if (end - start < 0.5) return;
+    isTrimming = true;
+    prevTrackId = null; // force stemStore.onTrackLoaded to re-run after reload
+    try {
+      await playerStore.trimAudio(start, end);
+      showTrimmer = false;
+    } finally {
+      isTrimming = false;
+    }
+  }
+
+  function cancelTrim() {
+    trimStartStore.set(0);
+    trimEndStore.set(null);
+    showTrimmer = false;
   }
 
   function handleExport() {
@@ -91,15 +128,33 @@
   let bookmarks: LoopBookmark[] = $state([]);
   playerStore.bookmarks.subscribe((v) => (bookmarks = v));
 
-  let isAnalyzingBookmarks = $state(false);
+  let analyzingBookmarksTrackId = $state<string | null>(null);
+  const isAnalyzingBookmarks = $derived(analyzingBookmarksTrackId !== null && analyzingBookmarksTrackId === ps.trackId);
+
+  // Subscribe to store-level structure analyzing state so reload restores the spinner
+  analyzingStructureTrackIdStore.subscribe((v) => { analyzingBookmarksTrackId = v; });
+
   async function handleAutoBookmarks() {
     if (isAnalyzingBookmarks || !ps.trackId) return;
-    isAnalyzingBookmarks = true;
+    const tid = ps.trackId;
+    showBookmarks = true;
+    autoBookmarksError = null;
     try {
+      // If stems aren't ready yet and the API is configured, separate first
+      const apiEndpoint = get(settingsStore).apiEndpoint;
+      if (stemState.status !== 'ready' && apiEndpoint) {
+        await stemStore.separate(ps.trackId);
+        // Abort structure analysis if separation failed
+        if (get(stemStore).status === 'error') return;
+      }
       await playerStore.autoBookmarks();
       showBookmarks = true;
+    } catch (e) {
+      if (e instanceof Error && e.message === AI_DURATION_LIMIT_ERROR) {
+        autoBookmarksError = '10分を超える楽曲はAI解析に対応していません';
+      }
     } finally {
-      isAnalyzingBookmarks = false;
+      // store is cleared by playerStore; no local cleanup needed
     }
   }
 
@@ -212,12 +267,60 @@
               <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
             </svg>
           </button>
+          <!-- Trim button -->
+          <button
+            class="p-1.5 rounded hover:bg-surface-lighter transition-all {showTrimmer ? 'text-amber-400 bg-amber-500/10' : 'text-text-muted/40 hover:text-amber-400'}"
+            onclick={() => { showTrimmer = !showTrimmer; if (!showTrimmer) cancelTrim(); }}
+            title="オーディオカッター"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7.848 8.25l1.536.887M7.848 8.25a3 3 0 1 1-5.196-3 3 3 0 0 1 5.196 3Zm1.536.887a2.165 2.165 0 0 1 1.083 1.839c.005.351.054.695.14 1.024M9.384 9.137l2.077 1.199M7.848 15.75l1.536-.887m-1.536.887a3 3 0 1 1-5.196 3 3 3 0 0 1 5.196-3Zm1.536-.887a2.165 2.165 0 0 1 1.083-1.838c.005-.352.054-.695.14-1.025m-1.223 2.863 2.077-1.199m0-3.328a4.323 4.323 0 0 1 2.068-1.379l5.325-1.628a4.5 4.5 0 0 1 2.48-.044l.803.215-7.794 4.5m-2.882-1.664L10.979 8.937m-2.595 12.548 7.795-4.5m0 0 .808.215a4.5 4.5 0 0 0 1.053-8.803l-2.288-.701" />
+            </svg>
+          </button>
         </div>
       {/if}
     </div>
 
     <!-- Waveform -->
-    <Waveform />
+    <Waveform {showTrimmer} />
+
+    <!-- Audio cutter controls -->
+    {#if showTrimmer}
+      <div class="bg-surface-light rounded-lg px-3 py-2 flex items-center gap-2">
+        <svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7.848 8.25l1.536.887M7.848 8.25a3 3 0 1 1-5.196-3 3 3 0 0 1 5.196 3Zm1.536.887a2.165 2.165 0 0 1 1.083 1.839c.005.351.054.695.14 1.024M9.384 9.137l2.077 1.199M7.848 15.75l1.536-.887m-1.536.887a3 3 0 1 1-5.196 3 3 3 0 0 1 5.196-3Zm1.536-.887a2.165 2.165 0 0 1 1.083-1.838c.005-.352.054-.695.14-1.025m-1.223 2.863 2.077-1.199m0-3.328a4.323 4.323 0 0 1 2.068-1.379l5.325-1.628a4.5 4.5 0 0 1 2.48-.044l.803.215-7.794 4.5m-2.882-1.664L10.979 8.937m-2.595 12.548 7.795-4.5m0 0 .808.215a4.5 4.5 0 0 0 1.053-8.803l-2.288-.701" />
+        </svg>
+        <div class="flex items-center gap-1.5 text-xs font-mono flex-1 min-w-0">
+          <span class="text-text-muted text-[10px]">IN</span>
+          <span class="tabular-nums text-amber-300">{formatTime(_trimStart)}</span>
+          <span class="text-text-muted/40 mx-0.5">—</span>
+          <span class="text-text-muted text-[10px]">OUT</span>
+          <span class="tabular-nums text-amber-300">{formatTime(_trimEnd ?? ps.duration)}</span>
+        </div>
+        <span class="text-[10px] text-text-muted/50 hidden sm:block flex-shrink-0">スクロールで拡大</span>
+        <button
+          class="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors disabled:opacity-40 flex-shrink-0"
+          onclick={handleApplyTrim}
+          disabled={isTrimming || (_trimStart === 0 && (_trimEnd === null || (_trimEnd !== null && Math.abs(_trimEnd - ps.duration) < 0.05)))}
+        >
+          {#if isTrimming}
+            <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+          {/if}
+          切り取り
+        </button>
+        <button
+          class="p-1 text-text-muted/50 hover:text-text-muted rounded transition-colors flex-shrink-0"
+          onclick={cancelTrim}
+          title="キャンセル"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {/if}
 
     <!-- Controls -->
     <Controls />
@@ -314,26 +417,6 @@
             </svg>
           </button>
           <div class="flex items-center gap-1">
-            {#if ps.trackId && bookmarks.length === 0 && !bookmarksIsAdding}
-              <button
-                class="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                onclick={handleAutoBookmarks}
-                disabled={isAnalyzingBookmarks}
-                title="楽曲構造を解析してセクションを自動ブックマーク"
-              >
-                {#if isAnalyzingBookmarks}
-                  <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                  </svg>
-                  解析中…
-                {:else}
-                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
-                  </svg>
-                  自動検出
-                {/if}
-              </button>
-            {/if}
             {#if canSaveAB && !bookmarksIsAdding}
               <button
                 class="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
@@ -348,7 +431,36 @@
           </div>
         </div>
         {#if showBookmarks}
-          <div class="mt-2">
+          <div class="mt-2 space-y-2">
+            {#if ps.trackId && bookmarks.length === 0 && !bookmarksIsAdding}
+              <div class="flex items-start justify-between gap-2">
+                <p class="text-xs text-text-muted">AIで楽曲構造を解析してセクションを自動ブックマークします。</p>
+                <button
+                  class="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onclick={handleAutoBookmarks}
+                  disabled={isAnalyzingBookmarks}
+                  title="楽曲構造を解析してセクションを自動ブックマーク"
+                >
+                  {#if isAnalyzingBookmarks}
+                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                    解析中…
+                  {:else}
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+                    </svg>
+                    自動検出
+                  {/if}
+                </button>
+              </div>
+              {#if isAnalyzingBookmarks}
+                <p class="text-[11px] text-text-muted opacity-70">数分かかる場合があります・処理中はアプリを閉じないでください</p>
+              {/if}
+              {#if autoBookmarksError}
+                <p class="text-[11px] text-red-400 mt-1">{autoBookmarksError}</p>
+              {/if}
+            {/if}
             <LoopBookmarks bare bind:isAdding={bookmarksIsAdding} />
           </div>
         {/if}
@@ -421,7 +533,7 @@
       {/if}
     </div>
 
-    <!-- Analysis info: BPM + Chords (β) -->
+    <!-- Analysis info: BPM + Chords -->
     <ChordDisplay />
   </div>
 {:else}

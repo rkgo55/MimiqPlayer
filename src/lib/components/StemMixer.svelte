@@ -127,31 +127,47 @@
 <div class="bg-surface-light p-3 space-y-3">
   {#if stemState.status === 'none' || stemState.status === 'error'}
     <!-- Separate button -->
-    <div class="space-y-2">
-      <p class="text-xs text-text-muted">
-        AIを使ってボーカル・ドラム・ベース・その他に分離します。
-        初回はモデルのダウンロードが必要です（数百MB）。
-      </p>
+    <div class="space-y-1.5">
+      <div class="flex items-start justify-between gap-2">
+        <p class="text-xs text-text-muted">
+          音源を6つの楽器ごとに分離します。
+        </p>
+        <button
+          class="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onclick={handleSeparate}
+          disabled={!trackId}
+        >
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+          </svg>
+          ステム分離を開始
+        </button>
+      </div>
       {#if stemState.status === 'error'}
         <p class="text-xs text-red-400">エラー: {stemState.message}</p>
       {/if}
-      <button
-        class="w-full py-2 rounded-lg text-sm font-medium bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50"
-        onclick={handleSeparate}
-        disabled={!trackId}
-      >
-        ステム分離を開始
-      </button>
     </div>
   {:else if stemState.status === 'processing'}
     <!-- Progress -->
-    <div class="space-y-2">
-      <div class="flex items-center gap-2">
-        <div class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
-        <span class="text-xs text-text-muted">{stemState.message}</span>
-        {#if stemState.remainingSeconds !== null}
-          <span class="text-xs text-text-muted opacity-60 ml-auto">{formatRemaining(stemState.remainingSeconds)}</span>
-        {/if}
+    <div class="space-y-1.5">
+      <div class="flex items-start justify-between gap-2">
+        <p class="text-xs text-text-muted">
+          {stemState.message}
+          {#if stemState.remainingSeconds !== null}
+            · {formatRemaining(stemState.remainingSeconds)}
+          {:else}
+            （数分かかる場合があります）
+          {/if}
+        </p>
+        <button
+          class="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent transition-colors opacity-75 cursor-default"
+          disabled
+        >
+          <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          分離中…
+        </button>
       </div>
       {#if stemState.downloadProgress !== null}
         <div class="w-full bg-surface-lighter rounded-full h-1.5">

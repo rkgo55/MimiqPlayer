@@ -10,6 +10,10 @@ import {
   saveStemFile,
   getTrackMeta,
   saveTrackMeta,
+  getAudioFile,
+  saveProcessingState,
+  deleteProcessingState,
+  getProcessingState,
 } from '../storage/db';
 import { StemSeparationClient } from '../audio/StemSeparationClient';
 import type { StemResult } from '../audio/StemSeparationClient';
@@ -17,6 +21,7 @@ import { encodeWavStereo16, decodeWavStereo16 } from '../audio/wavUtils';
 import { playerStore } from './playerStore';
 import { trackStore } from './trackStore';
 import { settingsStore } from './settingsStore';
+import { getApiClient } from '../audio/apiClient';
 
 // ── Parallel segmentation constants ──────────────────────────────────────────
 const SAMPLE_RATE = 44100;
@@ -113,23 +118,94 @@ function createStemStore() {
         // Stem files missing – treat as 'none' and let user re-separate
       }
 
+      // If a previous separation was interrupted (e.g. page reload mid-process),
+      // check whether the API is configured and can resume processing.
+      const interruptedPS = await getProcessingState(`${trackId}:separate`);
+      if (interruptedPS) {
+        const apiSettings = get(settingsStore);
+        if (apiSettings.apiEndpoint) {
+          // API path: server may have completed or cached the result.
+          // Status is currently 'none' (from initialState above), so the guard
+          // in separate() will pass. separate() will poll until result arrives.
+          void this.separate(trackId);
+          return;
+        }
+        // Browser ONNX path: worker is gone; clean up so user can start fresh.
+        await deleteProcessingState(`${trackId}:separate`);
+      }
+
       set({ ...initialState, volumes: savedVolumes });
     },
 
     /**
      * Start stem separation for the given trackId.
-     * Uses the currently loaded AudioBuffer from the playerStore engine.
-     *
-     * If the audio is longer than ~45 s, the track is split into 30-second
-     * segments with 0.5-second cross-fade overlap and processed in parallel
-     * using up to MAX_PARALLEL Web Workers.
+     * Guard: if already processing, return immediately.
      */
     async separate(trackId: string): Promise<void> {
+      // Per-track guard: skip if already processing
+      if (get({ subscribe }).status === 'processing') return;
+
       const engine = playerStore.engine;
       const audioBuf = engine.getAudioBuffer();
       if (!audioBuf) return;
 
-      update((s) => ({ ...s, status: 'processing', message: 'モデルを読み込み中…', downloadProgress: null }));
+      update((s) => ({ ...s, status: 'processing', message: 'ステム分離中…', downloadProgress: null }));
+      await saveProcessingState({ id: `${trackId}:separate`, trackId, tool: 'separate', startedAt: Date.now() });
+
+      // ── API path (modal.com server) ────────────────────────────────────────
+      const apiSettings = get(settingsStore);
+      if (apiSettings.apiEndpoint) {
+        try {
+          update((s) => ({
+            ...s,
+            message: 'API でステム分離中…',
+            downloadProgress: null,
+          }));
+
+          const audioFile = await getAudioFile(trackId);
+          if (!audioFile) throw new Error('Audio file not found');
+
+          const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
+          const trackMeta = await getTrackMeta(trackId);
+          const res = await client.separate(audioFile.data, trackMeta?.contentHash);
+
+          // Save binary OGG stems to IndexedDB
+          for (const [stemName, buf] of Object.entries(res.stems)) {
+            if (buf) {
+              await saveStemFile(trackId, stemName as StemType, buf);
+            }
+          }
+
+          // Update track meta
+          const meta = await getTrackMeta(trackId);
+          if (meta) {
+            await saveTrackMeta({ ...meta, stemStatus: 'ready' });
+          }
+
+          // Guard: skip engine load/state update if track changed
+          if (get(playerStore).trackId !== trackId) return;
+
+          // Load into engine
+          await loadStemsIntoEngine(trackId);
+          const currentState = get({ subscribe });
+          engine.setStemVolumes(currentState.volumes);
+
+          update((s) => ({ ...s, status: 'ready', message: '', downloadProgress: null }));
+          await deleteProcessingState(`${trackId}:separate`);
+        } catch (err) {
+          console.error('[StemStore] API separation failed:', err);
+          update((s) => ({
+            ...s,
+            status: 'error',
+            message: err instanceof Error ? err.message : String(err),
+            downloadProgress: null,
+          }));
+          await deleteProcessingState(`${trackId}:separate`);
+        }
+        return;
+      }
+
+      // ── Browser (ONNX / WebGPU) fallback path ────────────────────────────── 
 
       // Estimate segment count early (before extractStereo44k) so we can show
       // "ステム分離中 (0 / N セグメント完了)" immediately for long tracks.
@@ -215,13 +291,13 @@ function createStemStore() {
           const singleEstimate = isModelCachedSingle ? 100 : 140;
           suppressModelDownloadMsg = isModelCachedSingle;
           startFakeProgress(singleEstimate);
-          update((s) => ({ ...s, message: 'ステム分離中（数分かかる場合があります）' }));
+          update((s) => ({ ...s, message: 'ステム分離中…' }));
 
           const result = await client.separate(trackId, left, right, {
             onProcessing: () => {
               update((s) => ({
                 ...s,
-                message: 'ステム分離中（数分かかる場合があります）',
+                message: 'ステム分離中…',
               }));
             },
             modelUrl,
@@ -377,6 +453,12 @@ function createStemStore() {
         // Update the in-memory track list
         trackStore.updateStemStatus(trackId, 'ready');
 
+        // Guard: skip engine load/state update if track changed
+        if (get(playerStore).trackId !== trackId) {
+          stopFakeProgress();
+          return;
+        }
+
         // Load into engine
         await loadStemsIntoEngine(trackId);
         const currentState = get({ subscribe });
@@ -384,6 +466,7 @@ function createStemStore() {
 
         stopFakeProgress();
         update((s) => ({ ...s, status: 'ready', message: '', downloadProgress: null }));
+        await deleteProcessingState(`${trackId}:separate`);
 
         // Re-analyze chords/key/BPM using a harmony mix (bass + piano/guitar blend)
         void playerStore.reAnalyzeWithStem(trackId, resultStems);
@@ -396,6 +479,7 @@ function createStemStore() {
           message: err instanceof Error ? err.message : String(err),
           downloadProgress: null,
         }));
+        await deleteProcessingState(`${trackId}:separate`);
       } finally {
         unsubscribe();
         unsubscribeBackend();

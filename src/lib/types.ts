@@ -51,10 +51,28 @@ export interface TrackMeta {
   bookmarks?: LoopBookmark[];
   eq?: EQBands;
   chords?: { time: number; chord: string }[];
+  /** SHA-256 hash of the audio file content (first 32 hex chars) */
+  contentHash?: string;
+  /** Cached structure analysis segments (separate from user bookmarks) */
+  structureSegments?: { start: number; end: number; label: string }[];
   /** Whether stems have been separated for this track */
   stemStatus?: StemStatus;
   /** Per-stem volume levels saved by the user */
   stemVolumes?: StemVolumes;
+  /** Manual sort order (lower = higher in list); undefined = sort by addedAt */
+  order?: number;
+}
+
+/** Processing tool types for tracking in-progress AI work */
+export type ProcessingTool = 'analyze' | 'structure' | 'separate';
+
+/** Persisted processing state — allows recovery after app crash */
+export interface ProcessingState {
+  /** Composite key: `${trackId}:${tool}` */
+  id: string;
+  trackId: string;
+  tool: ProcessingTool;
+  startedAt: number;
 }
 
 /** App settings */
@@ -113,6 +131,10 @@ export interface AppSettings {
   stemModel: StemModelId;
   /** Keep the screen awake even when not playing */
   keepAwake: boolean;
+  /** modal.com API base URL (e.g. https://xxx--mimiqplayer-api.modal.run) */
+  apiEndpoint: string;
+  /** Bearer token for the Modal API */
+  apiKey: string;
 }
 
 /** Player state */
@@ -164,4 +186,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultPitch: 0,
   stemModel: 'htdemucs-6s',
   keepAwake: false,
+  // Populated at build time via VITE_API_ENDPOINT / VITE_API_KEY env vars.
+  // The user can override these in the Settings UI.
+  apiEndpoint: import.meta.env.VITE_API_ENDPOINT ?? '',
+  apiKey: import.meta.env.VITE_API_KEY ?? '',
 };

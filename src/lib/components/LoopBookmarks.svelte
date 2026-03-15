@@ -322,12 +322,6 @@
                     </div>
                   </div>
                 </div>
-                {#if canSave}
-                  <button
-                    class="w-full px-2 py-1.5 text-xs rounded bg-surface-lighter text-text-muted hover:bg-surface-lighter/70 transition-colors"
-                    onclick={() => { editingA = ps.abRepeat.a ?? editingA; editingB = ps.abRepeat.b ?? editingB; }}
-                  >現在のA-Bを反映</button>
-                {/if}
                 <button
                   class="w-full px-2 py-1.5 text-xs rounded bg-primary text-white hover:bg-primary/90 transition-colors"
                   onclick={() => handleUpdate(bm.id)}
