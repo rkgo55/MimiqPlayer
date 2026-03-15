@@ -107,7 +107,9 @@
 </script>
 
 <div class="bg-surface-light p-3 space-y-3">
-  {#if stemState.status === 'none' || stemState.status === 'error'}
+  {#if stemState.status === 'loading'}
+    <!-- Loading stems from storage: show nothing -->
+  {:else if stemState.status === 'none' || stemState.status === 'error'}
     <!-- Separate button -->
     <div class="space-y-1.5">
       <div class="flex items-start justify-between gap-2">

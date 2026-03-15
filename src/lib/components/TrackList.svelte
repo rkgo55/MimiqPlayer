@@ -41,7 +41,10 @@
     const reordered = [...tracks];
     const [item] = reordered.splice(from, 1);
     reordered.splice(to, 0, item);
-    void trackStore.reorder(reordered);
+    // Use $state.snapshot() to strip Svelte Proxy wrappers before passing to
+    // trackStore.reorder(), which will call IndexedDB's put() via structured clone.
+    // Plain Proxy objects cannot be structured-cloned and would throw DataCloneError.
+    void trackStore.reorder($state.snapshot(reordered) as typeof reordered);
   }
 
   function onDrop(i: number) {

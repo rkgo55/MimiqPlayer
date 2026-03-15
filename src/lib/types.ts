@@ -21,7 +21,7 @@ export const STEM_LABELS: Record<StemType, string> = {
 };
 
 /** Stem separation status for a track */
-export type StemStatus = 'none' | 'processing' | 'ready' | 'error';
+export type StemStatus = 'none' | 'loading' | 'processing' | 'ready' | 'error';
 
 /** Per-stem volume levels (0–1) — uses 4-stem base */
 export type StemVolumes = Record<StemType, number>;

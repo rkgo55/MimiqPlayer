@@ -66,8 +66,8 @@ function createStemStore() {
      * Checks whether stems already exist and loads them if so.
      */
     async onTrackLoaded(trackId: string): Promise<void> {
-      // Reset to initial state first
-      set({ ...initialState });
+      // Reset to loading state first
+      set({ ...initialState, status: 'loading' });
 
       const meta = await getTrackMeta(trackId);
       const savedVolumes: StemVolumes = { ...DEFAULT_STEM_VOLUMES, ...meta?.stemVolumes };

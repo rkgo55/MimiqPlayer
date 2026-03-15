@@ -79,7 +79,14 @@ function createTrackStore() {
     async reorder(ordered: TrackMeta[]) {
       const updated = ordered.map((t, i) => ({ ...t, order: i }));
       set(updated);
-      await Promise.all(updated.map((t) => saveTrackMeta(t)));
+      try {
+        await Promise.all(updated.map((t) => saveTrackMeta(t)));
+      } catch (e) {
+        console.error('[trackStore] reorder: DB save failed', e);
+        // Reload from DB to keep UI consistent with actual persisted state
+        const persisted = await getAllTracks();
+        set(persisted);
+      }
     },
   };
 }
