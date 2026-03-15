@@ -29,6 +29,8 @@ jobs:
 
       - name: Build
         run: npx vite build
+        env:
+          VITE_API_ENDPOINT: ${{ secrets.VITE_API_ENDPOINT }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
