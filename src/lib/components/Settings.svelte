@@ -121,7 +121,7 @@
             <input
               id="apiKey-input"
               type="password"
-              placeholder={builtInApiKey ? '••••••••' : 'Bearer token (ローカルサーバーは不要)'}
+              placeholder={builtInApiKey ? '••••••••' : 'Token'}
               value={settings.apiKey}
               oninput={(e) => settingsStore.update((s) => ({ ...s, apiKey: (e.target as HTMLInputElement).value.trim() }))}
               class="w-full text-[11px] bg-surface border border-surface-lighter rounded px-2 py-1 text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary"
