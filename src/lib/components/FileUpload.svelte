@@ -128,7 +128,7 @@
   <input
     bind:this={fileInput}
     type="file"
-    accept="audio/*,video/*,.zip,application/zip"
+    accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.wav,.flac,.opus,.aiff,.aif,.weba,video/*,.mp4,.mov,.m4v,.webm,.mkv,.3gp,.zip,application/zip"
     multiple
     class="hidden"
     onchange={onFileChange}
