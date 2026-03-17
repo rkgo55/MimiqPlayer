@@ -102,7 +102,7 @@
 </script>
 
 {#if ps.trackId}
-  <div class="bg-surface-light rounded-lg px-3 py-1.5">
+  <div class="bg-surface-light rounded-lg px-3 py-1.5 overflow-hidden">
     <div class="flex items-center gap-3">
       <!-- BPM -->
       <div class="flex flex-col items-center justify-center min-w-[40px]">
