@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { playerStore, trimStart as trimStartStore, trimEnd as trimEndStore, activeBookmarkId as activeBookmarkIdStore } from '../stores/playerStore';
-  import type { WaveformData, PlayerState, LoopBookmark } from '../types';
+  import { playerStore, trimStart as trimStartStore, trimEnd as trimEndStore, activeBookmarkId as activeBookmarkIdStore, activeSectionId as activeSectionIdStore } from '../stores/playerStore';
+  import type { WaveformData, PlayerState, LoopBookmark, SectionPoint } from '../types';
 
   interface Props {
     showTrimmer?: boolean;
+    showSectionLines?: boolean;
+    showABHandles?: boolean;
+    onseek?: (time: number) => void;
   }
-  let { showTrimmer = false }: Props = $props();
+  let { showTrimmer = false, showSectionLines = false, showABHandles = true, onseek }: Props = $props();
 
   let waveformData: WaveformData | null = $state(null);
   let playerState: PlayerState = $state({
@@ -17,6 +20,9 @@
   let _trimEnd = $state<number | null>(null);
   let _bookmarks = $state<LoopBookmark[]>([]);
   let _activeBookmarkId = $state<string | null>(null);
+  let _sectionPoints = $state<SectionPoint[]>([]);
+  let _draggingSectionId: string | null = null;
+  let _activeSectionId: string | null = null;
 
   let canvas: HTMLCanvasElement;
   let container: HTMLDivElement;
@@ -26,7 +32,7 @@
   let zoomOffset = $state(0); // 0..1 fraction of total duration at left edge
 
   // Pointer interaction
-  type DragTarget = 'seek' | 'pan' | 'playhead' | 'trimStart' | 'trimEnd' | 'abA' | 'abB' | null;
+  type DragTarget = 'seek' | 'pan' | 'playhead' | 'trimStart' | 'trimEnd' | 'abA' | 'abB' | 'section' | null;
   let dragTarget = $state<DragTarget>(null);
   let activePointerId: number | null = $state(null);
   let hoverTarget = $state<HandleTarget | null>(null);
@@ -48,6 +54,8 @@
   $effect(() => { const u = trimEndStore.subscribe((v) => { _trimEnd = v; requestAnimationFrame(draw); }); return u; });
   $effect(() => { const u = playerStore.bookmarks.subscribe((v) => { _bookmarks = v; }); return u; });
   $effect(() => { const u = activeBookmarkIdStore.subscribe((v) => { _activeBookmarkId = v; }); return u; });
+  $effect(() => { const u = playerStore.sectionPoints.subscribe((v) => { _sectionPoints = v; requestAnimationFrame(draw); }); return u; });
+  $effect(() => { const u = activeSectionIdStore.subscribe((v) => { _activeSectionId = v; }); return u; });
 
   // Reset zoom when track changes
   let _lastTrackId: string | null = null;
@@ -56,7 +64,7 @@
     if (tid !== _lastTrackId) { _lastTrackId = tid; zoomLevel = 1; zoomOffset = 0; }
   });
 
-  $effect(() => { showTrimmer; zoomLevel; zoomOffset; requestAnimationFrame(draw); });
+  $effect(() => { showTrimmer; showSectionLines; showABHandles; zoomLevel; zoomOffset; requestAnimationFrame(draw); });
 
   function visibleRange(): { start: number; end: number } {
     const range = 1 / zoomLevel;
@@ -144,8 +152,10 @@
     }
 
     // ── A-B handles ───────────────────────────────────────────────────────
-    if (abRepeat.b !== null) drawABHandle(ctx, timeToX(abRepeat.b, w), h, '#ef4444', 'B', false);
-    if (abRepeat.a !== null) drawABHandle(ctx, timeToX(abRepeat.a, w), h, '#22c55e', 'A', true);
+    if (showABHandles) {
+      if (abRepeat.b !== null) drawABHandle(ctx, timeToX(abRepeat.b, w), h, '#ef4444', 'B', false);
+      if (abRepeat.a !== null) drawABHandle(ctx, timeToX(abRepeat.a, w), h, '#22c55e', 'A', true);
+    }
 
     // ── Trim handles ──────────────────────────────────────────────────────
     if (showTrimmer && duration > 0) {
@@ -153,6 +163,12 @@
       drawTrimHandle(ctx, timeToX(_trimEnd ?? duration, w), h, true);
     }
 
+    // ── Section points ────────────────────────────────────────────────────
+    if (showSectionLines) {
+      for (const sp of _sectionPoints) {
+        drawSectionHandle(ctx, timeToX(sp.time, w), h, sp.id === _draggingSectionId);
+      }
+    }
 
   }
 
@@ -192,10 +208,31 @@
     }
   }
 
+  /** Section point handle: amber diamond at bottom, dashed vertical line */
+  function drawSectionHandle(ctx: CanvasRenderingContext2D, x: number, h: number, active: boolean) {
+    ctx.save();
+    ctx.strokeStyle = active ? '#fb923c' : '#f59e0b';
+    ctx.lineWidth = active ? 2 : 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    ctx.setLineDash([]);
+    const S = 6;
+    ctx.fillStyle = active ? '#fb923c' : '#f59e0b';
+    ctx.beginPath();
+    ctx.moveTo(x, h - S * 2);
+    ctx.lineTo(x + S, h - S);
+    ctx.lineTo(x, h);
+    ctx.lineTo(x - S, h - S);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   const TRIM_HIT_PX = 14;
   const AB_HIT_PX = 10;
+  const SECTION_HIT_PX = 8;
 
-  type HandleTarget = 'playhead' | 'trimStart' | 'trimEnd' | 'abA' | 'abB';
+  type HandleTarget = 'playhead' | 'trimStart' | 'trimEnd' | 'abA' | 'abB' | 'section';
   function hitTest(x: number, w: number): HandleTarget | null {
     const dur = waveformData?.duration ?? 0;
     if (dur <= 0) return null;
@@ -204,10 +241,21 @@
       if (Math.abs(x - timeToX(_trimEnd ?? dur, w)) <= TRIM_HIT_PX) return 'trimEnd';
       if (Math.abs(x - timeToX(_trimStart, w)) <= TRIM_HIT_PX) return 'trimStart';
     }
-    // A-B handles
-    const { abRepeat } = playerState;
-    if (abRepeat.b !== null && Math.abs(x - timeToX(abRepeat.b, w)) <= AB_HIT_PX) return 'abB';
-    if (abRepeat.a !== null && Math.abs(x - timeToX(abRepeat.a, w)) <= AB_HIT_PX) return 'abA';
+    // A-B handles (only when visible)
+    if (showABHandles) {
+      const { abRepeat } = playerState;
+      if (abRepeat.b !== null && Math.abs(x - timeToX(abRepeat.b, w)) <= AB_HIT_PX) return 'abB';
+      if (abRepeat.a !== null && Math.abs(x - timeToX(abRepeat.a, w)) <= AB_HIT_PX) return 'abA';
+    }
+    // Section point handles (only when visible)
+    if (showSectionLines) {
+      for (const sp of _sectionPoints) {
+        if (Math.abs(x - timeToX(sp.time, w)) <= SECTION_HIT_PX) {
+          _draggingSectionId = sp.id;
+          return 'section';
+        }
+      }
+    }
     // Playhead (only when zoomed so tap-to-seek at zoom=1 is unaffected)
     if (zoomLevel > 1 && Math.abs(x - timeToX(playerState.currentTime, w)) <= AB_HIT_PX) return 'playhead';
     return null;
@@ -311,6 +359,15 @@
       playerStore.setATime(t);
     } else if (dragTarget === 'abB') {
       playerStore.setBTime(t);
+    } else if (dragTarget === 'section' && _draggingSectionId) {
+      // Preview position (optimistic update for smooth drag)
+      const clamped = Math.max(0.1, Math.min(dur - 0.1, t));
+      if (_sectionPoints.find((s) => s.id === _draggingSectionId)) {
+        _sectionPoints = _sectionPoints.map((s) => s.id === _draggingSectionId ? { ...s, time: clamped } : s).sort((a, b) => a.time - b.time);
+        // If a section is active, keep A-B in sync
+        if (_activeSectionId) syncActiveSectionAB();
+        requestAnimationFrame(draw);
+      }
     }
   }
 
@@ -337,12 +394,38 @@
         }
       }
     }
+
+    // Persist section point position after drag
+    if (finished === 'section' && _draggingSectionId) {
+      const sp = _sectionPoints.find((s) => s.id === _draggingSectionId);
+      if (sp) void playerStore.updateSectionPoint(_draggingSectionId, sp.time);
+      _draggingSectionId = null;
+    }
+  }
+
+  /** Recompute A-B from the local (possibly mid-drag) _sectionPoints for the active section. */
+  function syncActiveSectionAB() {
+    if (!_activeSectionId) return;
+    const sorted = [..._sectionPoints].sort((a, b) => a.time - b.time);
+    const dur = waveformData?.duration ?? 0;
+    let newA = 0, newB = dur;
+    let prevId = 'start';
+    let prev = 0;
+    for (const sp of sorted) {
+      if (prevId === _activeSectionId) { newB = sp.time; break; }
+      prev = sp.time;
+      prevId = sp.id;
+    }
+    if (prevId === _activeSectionId) newA = prev;
+    playerStore.setAB(newA, newB);
   }
 
   function seekFromClientX(clientX: number) {
     if (!waveformData || !container) return;
     const rect = container.getBoundingClientRect();
-    playerStore.seek(xToTime(clientX - rect.left, rect.width));
+    const t = xToTime(clientX - rect.left, rect.width);
+    playerStore.seek(t);
+    onseek?.(t);
   }
 
   function handleWheel(e: WheelEvent) {
@@ -362,12 +445,14 @@
   const isHandleDrag = $derived(
     dragTarget === 'playhead' ||
     dragTarget === 'trimStart' || dragTarget === 'trimEnd' ||
-    dragTarget === 'abA' || dragTarget === 'abB'
+    dragTarget === 'abA' || dragTarget === 'abB' ||
+    dragTarget === 'section'
   );
   const isHandleHover = $derived(
     hoverTarget === 'playhead' ||
     hoverTarget === 'trimStart' || hoverTarget === 'trimEnd' ||
-    hoverTarget === 'abA' || hoverTarget === 'abB'
+    hoverTarget === 'abA' || hoverTarget === 'abB' ||
+    hoverTarget === 'section'
   );
   const isPanMode = $derived(dragTarget === 'pan' && hasPanned);
 

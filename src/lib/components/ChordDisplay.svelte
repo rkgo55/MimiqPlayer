@@ -45,7 +45,27 @@
     chords.length > 0 ? getCurrentChord(chords, ps.currentTime) : ''
   );
 
-  /** Upcoming chords (deduplicate consecutive same chords, show next 3 distinct) */
+  /** Past chords (last 2 distinct chords before current) */
+  const pastChords = $derived.by(() => {
+    if (chords.length === 0) return [];
+    // Find the start time of the current chord segment
+    let currentChordStartTime = 0;
+    for (const c of chords) {
+      if (c.time > ps.currentTime) break;
+      if (c.chord !== 'N') currentChordStartTime = c.time;
+    }
+    const seen: { chord: string; time: number }[] = [];
+    for (const c of chords) {
+      if (c.time >= currentChordStartTime) break;
+      if (c.chord === 'N') continue;
+      if (seen.length === 0 || seen[seen.length - 1].chord !== c.chord) {
+        seen.push(c);
+      }
+    }
+    return seen.slice(-2);
+  });
+
+  /** Upcoming chords (deduplicate consecutive same chords, show next 2 distinct) */
   const upcomingChords = $derived.by(() => {
     if (chords.length === 0) return [];
     const result: { chord: string; time: number }[] = [];
@@ -55,7 +75,7 @@
       if (c.chord === lastChord || c.chord === 'N') continue;
       result.push(c);
       lastChord = c.chord;
-      if (result.length >= 3) break;
+      if (result.length >= 2) break;
     }
     return result;
   });
@@ -81,11 +101,115 @@
 </script>
 
 {#if ps.trackId}
-  <div class="bg-surface-light rounded-lg p-3 space-y-2">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
-      <span class="text-xs text-text-muted font-medium">解析情報</span>
-      <div class="flex items-center gap-1.5">
+  <div class="bg-surface-light rounded-lg px-3 py-1.5">
+    <div class="flex items-center gap-3">
+      <!-- BPM -->
+      <div class="flex flex-col items-center justify-center min-w-[40px]">
+        {#if bpm > 0}
+          <div class="text-base font-bold text-text leading-tight">{Math.round(bpm)}</div>
+          <div class="text-[9px] text-text-muted">BPM</div>
+        {:else}
+          <div class="text-base font-bold text-text-muted/30 leading-tight animate-pulse">—</div>
+          <div class="text-[9px] text-text-muted">BPM</div>
+        {/if}
+      </div>
+
+      <!-- Divider -->
+      <div class="w-px bg-surface-lighter flex-shrink-0 self-stretch"></div>
+
+      <!-- Key -->
+      <div class="flex flex-col items-center justify-center min-w-[44px]">
+        {#if key}
+          {@const [root, mode] = displayKey.split(' ')}
+          <div class="text-sm font-bold text-text leading-tight">{root}{mode !== 'major' ? 'min' : ''}</div>
+          <div class="text-[9px] text-text-muted">キー</div>
+        {:else}
+          <div class="text-sm font-bold text-text-muted/30 leading-tight animate-pulse">—</div>
+          <div class="text-[9px] text-text-muted">キー</div>
+        {/if}
+      </div>
+
+      <!-- Divider -->
+      <div class="w-px bg-surface-lighter flex-shrink-0 self-stretch"></div>
+
+      <!-- Chord timeline: past → current → future (fixed-width slots) -->
+      <div class="flex items-center flex-1 min-w-0">
+        {#if isDetecting}
+          <span class="text-xs text-text-muted/40 animate-pulse">解析中...</span>
+        {:else if chords.length > 0}
+          <!-- Past chord slots (always 2, empty if not enough history) -->
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.25">
+            {#if pastChords.length >= 2}
+              <div class="text-xs font-semibold text-text leading-none">{displayChord(pastChords[pastChords.length - 2].chord)}</div>
+              <div class="text-[9px] text-text-muted leading-none mt-0.5">-{Math.floor(ps.currentTime - pastChords[pastChords.length - 2].time)}s</div>
+            {:else}
+              <div class="text-xs leading-none">&nbsp;</div>
+              <div class="text-[9px] leading-none mt-0.5">&nbsp;</div>
+            {/if}
+          </div>
+          <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
+          </svg>
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.55">
+            {#if pastChords.length >= 1}
+              <div class="text-xs font-semibold text-text leading-none">{displayChord(pastChords[pastChords.length - 1].chord)}</div>
+              <div class="text-[9px] text-text-muted leading-none mt-0.5">-{Math.floor(ps.currentTime - pastChords[pastChords.length - 1].time)}s</div>
+            {:else}
+              <div class="text-xs leading-none">&nbsp;</div>
+              <div class="text-[9px] leading-none mt-0.5">&nbsp;</div>
+            {/if}
+          </div>
+          <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
+          </svg>
+
+          <!-- Current chord (fixed width, highlighted, vertically centered) -->
+          <div class="w-16 text-center flex-shrink-0">
+            {#if currentChord && currentChord !== 'N'}
+              <span class="text-base font-bold text-primary leading-none">{displayChord(currentChord)}</span>
+            {:else}
+              <span class="text-base font-bold text-text-muted/30 leading-none">—</span>
+            {/if}
+          </div>
+
+          <!-- Upcoming chord slots (always 2, empty if not enough) -->
+          <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
+          </svg>
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.55">
+            {#if upcomingChords.length >= 1}
+              <div class="text-xs font-semibold text-text leading-none">{displayChord(upcomingChords[0].chord)}</div>
+              <div class="text-[9px] text-text-muted leading-none mt-0.5">{Math.ceil(upcomingChords[0].time - ps.currentTime)}s</div>
+            {/if}
+          </div>
+          <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
+          </svg>
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.25">
+            {#if upcomingChords.length >= 2}
+              <div class="text-xs font-semibold text-text leading-none">{displayChord(upcomingChords[1].chord)}</div>
+              <div class="text-[9px] text-text-muted leading-none mt-0.5">{Math.ceil(upcomingChords[1].time - ps.currentTime)}s</div>
+            {/if}
+          </div>
+        {:else}
+          <div class="flex flex-col items-center">
+            <span class="text-base font-bold text-text-muted/30 leading-none">—</span>
+            <span class="text-[9px] text-text-muted mt-0.5">コード</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Divider -->
+      <div class="w-px bg-surface-lighter flex-shrink-0 self-stretch"></div>
+
+      <!-- Analyze button (right-aligned) -->
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+        {#if isAnalyzing}
+          <p class="text-[10px] text-text-muted opacity-70">数分かかる場合があります</p>
+        {/if}
+        {#if aiError}
+          <p class="text-[10px] text-red-400">{aiError}</p>
+        {/if}
         {#if needsAnalysis}
           <button
             class="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -105,85 +229,6 @@
               解析
             {/if}
           </button>
-        {/if}
-      </div>
-    </div>
-
-    {#if isAnalyzing}
-      <p class="text-[11px] text-text-muted opacity-70">数分かかる場合があります・処理中はアプリを閉じないでください</p>
-    {/if}
-    {#if aiError}
-      <p class="text-[11px] text-red-400">{aiError}</p>
-    {/if}
-
-    <div class="flex items-stretch gap-3">
-      <!-- BPM -->
-      <div class="flex flex-col items-center justify-center min-w-[48px]">
-        {#if bpm > 0}
-          <div class="text-xl font-bold text-text leading-tight">{Math.round(bpm)}</div>
-          <div class="text-[10px] text-text-muted mt-0.5">BPM</div>
-        {:else}
-          <div class="text-xl font-bold text-text-muted/30 leading-tight animate-pulse">—</div>
-          <div class="text-[10px] text-text-muted mt-0.5">BPM</div>
-        {/if}
-      </div>
-
-      <!-- Divider -->
-      <div class="w-px bg-surface-lighter flex-shrink-0 self-stretch"></div>
-
-      <!-- Key -->
-      <div class="flex flex-col items-center justify-center min-w-[52px]">
-        {#if key}
-          {@const [root, mode] = displayKey.split(' ')}
-          <div class="text-base font-bold text-text leading-tight">{root}</div>
-          <div class="text-[10px] text-text-muted mt-0.5">{mode === 'major' ? 'メジャー' : 'マイナー'}</div>
-        {:else}
-          <div class="text-base font-bold text-text-muted/30 leading-tight animate-pulse">—</div>
-          <div class="text-[10px] text-text-muted mt-0.5">キー</div>
-        {/if}
-      </div>
-
-      <!-- Divider -->
-      <div class="w-px bg-surface-lighter flex-shrink-0 self-stretch"></div>
-
-      <!-- Current chord -->
-      <div class="flex flex-col items-center justify-center min-w-[48px]">
-        {#if isDetecting}
-          <div class="text-xl font-bold text-text-muted/30 leading-tight animate-pulse">—</div>
-          <div class="text-[10px] text-text-muted mt-0.5">コード</div>
-        {:else if currentChord && currentChord !== 'N'}
-          <div class="text-xl font-bold text-primary leading-tight">{displayChord(currentChord)}</div>
-          <div class="text-[10px] text-text-muted mt-0.5">コード</div>
-        {:else}
-          <div class="text-xl font-bold text-text-muted/30 leading-tight">—</div>
-          <div class="text-[10px] text-text-muted mt-0.5">コード</div>
-        {/if}
-      </div>
-
-      <!-- Divider -->
-      <div class="w-px bg-surface-lighter flex-shrink-0 self-stretch"></div>
-
-      <!-- Upcoming chords -->
-      <div class="flex items-center gap-2 flex-1 min-w-0 pl-1">
-        {#if upcomingChords.length > 0 && !isDetecting}
-          {#each upcomingChords as upcoming, i (upcoming.time)}
-            <div
-              class="flex flex-col items-center flex-shrink-0"
-              style="opacity: {i === 0 ? 0.75 : i === 1 ? 0.45 : 0.25}"
-            >
-              <span class="text-xs font-semibold text-text">{displayChord(upcoming.chord)}</span>
-              <span class="text-[9px] text-text-muted">{Math.ceil(upcoming.time - ps.currentTime)}s</span>
-            </div>
-            {#if i < upcomingChords.length - 1}
-              <svg class="w-2.5 h-2.5 text-text-muted/30 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
-              </svg>
-            {/if}
-          {/each}
-        {:else if isDetecting}
-          <span class="text-xs text-text-muted/40 animate-pulse">解析中...</span>
-        {:else}
-          <span class="text-xs text-text-muted/30">—</span>
         {/if}
       </div>
     </div>

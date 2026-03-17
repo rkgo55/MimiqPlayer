@@ -1,6 +1,6 @@
 <script lang="ts">
   import { selectedTrack, trackStore } from '../stores/trackStore';
-  import { playerStore, analyzingStructureTrackId as analyzingStructureTrackIdStore, trimStart as trimStartStore, trimEnd as trimEndStore, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
+  import { playerStore, activeSectionId, trimStart as trimStartStore, trimEnd as trimEndStore } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
   import { apiKeyModalStore } from '../stores/uiStore';
   import { stemStore, type StemState } from '../stores/stemStore';
@@ -11,6 +11,7 @@
   import ABRepeat from './ABRepeat.svelte';
   import EQPanel from './EQPanel.svelte';
   import LoopBookmarks from './LoopBookmarks.svelte';
+  import SectionPoints from './SectionPoints.svelte';
   import ChordDisplay from './ChordDisplay.svelte';
   import StemMixer from './StemMixer.svelte';
   import APIKeyRequiredModal from './APIKeyRequiredModal.svelte';
@@ -31,6 +32,19 @@
   let showPlaySettings = $state(false);
   let showBookmarks = $state(false);
   let bookmarksIsAdding = $state(false);
+  let repeatTab = $state<'ab' | 'section'>('ab');
+  let _activeSectionId: string | null = $state(null);
+  activeSectionId.subscribe((v) => (_activeSectionId = v));
+
+  // セクションタブが開いているときは常にリピートを有効化
+  $effect(() => {
+    if (repeatTab === 'section' && _activeSectionId !== null) {
+      const s = get(playerStore);
+      if (!s.abRepeat.enabled && s.abRepeat.a !== null && s.abRepeat.b !== null) {
+        playerStore.toggleABRepeat();
+      }
+    }
+  });
   let showEQ = $state(false);
   let showStems = $state(false);
   let editingTrackInfo = $state(false);
@@ -45,7 +59,6 @@
   let isTrimming = $state(false);
   let _trimStart = $state(0);
   let _trimEnd = $state<number | null>(null);
-  let autoBookmarksError = $state<string | null>(null);
   trimStartStore.subscribe((v) => (_trimStart = v));
   trimEndStore.subscribe((v) => (_trimEnd = v));
 
@@ -132,40 +145,6 @@
 
   let bookmarks: LoopBookmark[] = $state([]);
   playerStore.bookmarks.subscribe((v) => (bookmarks = v));
-
-  let analyzingBookmarksTrackId = $state<string | null>(null);
-  const isAnalyzingBookmarks = $derived(analyzingBookmarksTrackId !== null && analyzingBookmarksTrackId === ps.trackId);
-
-  // Subscribe to store-level structure analyzing state so reload restores the spinner
-  analyzingStructureTrackIdStore.subscribe((v) => { analyzingBookmarksTrackId = v; });
-
-  async function handleAutoBookmarks() {
-    if (isAnalyzingBookmarks || !ps.trackId) return;
-    const apiEndpoint = get(settingsStore).apiEndpoint;
-    if (!get(settingsStore).apiKey) {
-      apiKeyModalStore.set(true);
-      return;
-    }
-    const tid = ps.trackId;
-    showBookmarks = true;
-    autoBookmarksError = null;
-    try {
-      // If stems aren't ready yet and the API is configured, separate first
-      if (stemState.status !== 'ready' && apiEndpoint) {
-        await stemStore.separate(ps.trackId);
-        // Abort structure analysis if separation failed
-        if (get(stemStore).status === 'error') return;
-      }
-      await playerStore.autoBookmarks();
-      showBookmarks = true;
-    } catch (e) {
-      if (e instanceof Error && e.message === AI_DURATION_LIMIT_ERROR) {
-        autoBookmarksError = '10分を超える楽曲はAI解析に対応していません';
-      }
-    } finally {
-      // store is cleared by playerStore; no local cleanup needed
-    }
-  }
 
   // Stem state
   let stemState: StemState = $state({
@@ -290,8 +269,13 @@
       {/if}
     </div>
 
+    <!-- Analysis info: BPM + Chords -->
+    <ChordDisplay />
+
     <!-- Waveform -->
-    <Waveform {showTrimmer} />
+    <Waveform {showTrimmer} showSectionLines={repeatTab === 'section'} showABHandles={repeatTab !== 'section'}
+      onseek={(t) => { if (repeatTab === 'section') playerStore.loadSectionAtTime(t, false); }}
+    />
 
     <!-- Audio cutter controls -->
     {#if showTrimmer}
@@ -407,73 +391,63 @@
       {/if}
     </div>
 
-    <!-- A-B Repeat + Loop Bookmarks (combined box) -->
-    <div class="bg-surface-light rounded-lg p-3 space-y-0">
-      <ABRepeat bare />
-      <div class="border-t border-white/5 mt-3 pt-2">
-        <div class="flex items-center justify-between">
-          <button
-            class="flex items-center gap-1.5 text-xs transition-colors
-              {showBookmarks ? 'text-primary' : 'text-text-muted hover:text-text'}"
-            onclick={() => (showBookmarks = !showBookmarks)}
-          >
-            <span class="font-medium">ループブックマーク</span>
-            <svg
-              class="w-3.5 h-3.5 transition-transform duration-200 {showBookmarks ? 'rotate-180' : ''}"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="m19 9-7 7-7-7" />
-            </svg>
-          </button>
-          <div class="flex items-center gap-1">
-            {#if canSaveAB && !bookmarksIsAdding}
-              <button
-                class="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
-                onclick={() => { showBookmarks = true; bookmarksIsAdding = true; }}
-              >
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                保存
-              </button>
-            {/if}
-          </div>
-        </div>
-        {#if showBookmarks}
-          <div class="mt-2 space-y-2">
-            {#if ps.trackId && bookmarks.length === 0 && !bookmarksIsAdding}
-              <div class="flex items-start justify-between gap-2">
-                <p class="text-xs text-text-muted">AIで楽曲構造を解析してセクションを自動ブックマークします。</p>
-                <button
-                  class="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  onclick={handleAutoBookmarks}
-                  disabled={isAnalyzingBookmarks}
-                  title="楽曲構造を解析してセクションを自動ブックマーク"
-                >
-                  {#if isAnalyzingBookmarks}
-                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                    </svg>
-                    解析中…
-                  {:else}
-                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
-                    </svg>
-                    自動検出
-                  {/if}
-                </button>
-              </div>
-              {#if isAnalyzingBookmarks}
-                <p class="text-[11px] text-text-muted opacity-70">数分かかる場合があります・処理中はアプリを閉じないでください</p>
-              {/if}
-              {#if autoBookmarksError}
-                <p class="text-[11px] text-red-400 mt-1">{autoBookmarksError}</p>
-              {/if}
-            {/if}
-            <LoopBookmarks bare bind:isAdding={bookmarksIsAdding} />
-          </div>
-        {/if}
+
+    <!-- リピート (ABリピート / セクションリピート タブ) -->
+    <div class="bg-surface-light rounded-lg p-3 space-y-3">
+      <!-- Tab bar -->
+      <div class="flex items-center gap-0.5 bg-surface rounded-lg p-0.5">
+        <button
+          class="flex-1 py-1 text-xs rounded-md transition-colors font-medium
+            {repeatTab === 'ab' ? 'bg-surface-lighter text-text shadow-sm' : 'text-text-muted hover:text-text'}"
+          onclick={() => { repeatTab = 'ab'; }}
+        >ABリピート</button>
+        <button
+          class="flex-1 py-1 text-xs rounded-md transition-colors font-medium
+            {repeatTab === 'section' ? 'bg-surface-lighter text-text shadow-sm' : 'text-text-muted hover:text-text'}"
+          onclick={() => { repeatTab = 'section'; }}
+        >セクションリピート</button>
       </div>
+
+      {#if repeatTab === 'ab'}
+        <ABRepeat bare />
+        <div class="border-t border-white/5 pt-2">
+          <div class="flex items-center justify-between">
+            <button
+              class="flex items-center gap-1.5 text-xs transition-colors
+                {showBookmarks ? 'text-primary' : 'text-text-muted hover:text-text'}"
+              onclick={() => (showBookmarks = !showBookmarks)}
+            >
+              <span class="font-medium">ループブックマーク</span>
+              <svg
+                class="w-3.5 h-3.5 transition-transform duration-200 {showBookmarks ? 'rotate-180' : ''}"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="m19 9-7 7-7-7" />
+              </svg>
+            </button>
+            <div class="flex items-center gap-1">
+              {#if canSaveAB && !bookmarksIsAdding}
+                <button
+                  class="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
+                  onclick={() => { showBookmarks = true; bookmarksIsAdding = true; }}
+                >
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  保存
+                </button>
+              {/if}
+            </div>
+          </div>
+          {#if showBookmarks}
+            <div class="mt-2">
+              <LoopBookmarks bare bind:isAdding={bookmarksIsAdding} />
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <SectionPoints />
+      {/if}
     </div>
 
     <!-- EQ -->
@@ -541,9 +515,6 @@
         <StemMixer />
       {/if}
     </div>
-
-    <!-- Analysis info: BPM + Chords -->
-    <ChordDisplay />
   </div>
 {:else}
   <div class="flex items-center justify-center h-48 md:h-64 text-text-muted">

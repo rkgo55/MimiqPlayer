@@ -55,6 +55,10 @@ export interface TrackMeta {
   contentHash?: string;
   /** Cached structure analysis segments (separate from user bookmarks) */
   structureSegments?: { start: number; end: number; label: string }[];
+  /** Section points that divide the audio into loopable sections */
+  sectionPoints?: SectionPoint[];
+  /** Labels for each section, keyed by sectionId ('start' for section 0, sp.id for others) */
+  sectionLabels?: Record<string, string>;
   /** Whether stems have been separated for this track */
   stemStatus?: StemStatus;
   /** Per-stem volume levels saved by the user */
@@ -116,6 +120,12 @@ export interface LoopBookmark {
   label: string;
   a: number;
   b: number;
+}
+
+/** A single section point (timestamp) that divides the audio into sections */
+export interface SectionPoint {
+  id: string;
+  time: number; // seconds from start
 }
 
 /** 10-band EQ gains in dB, indices 0-9 correspond to 32/64/125/250/500/1k/2k/4k/8k/16kHz */

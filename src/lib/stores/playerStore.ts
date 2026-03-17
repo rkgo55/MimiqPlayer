@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { PlayerState, EQBands, LoopBookmark } from '../types';
+import type { PlayerState, EQBands, LoopBookmark, SectionPoint } from '../types';
 import { EQ_FLAT } from '../types';
 import { AudioEngine } from '../audio/AudioEngine';
 import { getAudioFile, saveAudioFile, getTrackMeta, saveTrackMeta, getStemFile, saveProcessingState, deleteProcessingState, deleteStemFiles } from '../storage/db';
@@ -20,6 +20,9 @@ export const analyzingStructureTrackId = writable<string | null>(null);
 
 /** Currently active bookmark — set when loadBookmark() is called, cleared on manual A/B edits */
 export const activeBookmarkId = writable<string | null>(null);
+
+/** Currently active section (section point ID of the section start, or 'start' for before first point) */
+export const activeSectionId = writable<string | null>(null);
 
 /** Thrown by analyzeTrack / autoBookmarks when the track exceeds the API's 10-min limit */
 export const AI_DURATION_LIMIT_ERROR = 'duration_limit';
@@ -213,6 +216,8 @@ function createPlayerStore() {
   const key = writable<string>('');
   const eq = writable<EQBands>(loadEQFromStorage());
   const bookmarks = writable<LoopBookmark[]>([]);
+  const sectionPoints = writable<SectionPoint[]>([]);
+  const sectionLabels = writable<Record<string, string>>({});
   const chords = writable<ChordInfo[]>([]);
 
   // A-B repeat check
@@ -261,6 +266,8 @@ function createPlayerStore() {
     key,
     eq,
     bookmarks,
+    sectionPoints,
+    sectionLabels,
     chords,
     engine,
 
@@ -294,6 +301,8 @@ function createPlayerStore() {
         if (!isCurrentTrack()) return;
 
         bookmarks.set(meta?.bookmarks ?? []);
+        sectionPoints.set(meta?.sectionPoints ?? []);
+        sectionLabels.set(meta?.sectionLabels ?? {});
 
         // Cache metadata and update Media Session.
         // Use a Blob URL for artwork so Android Chrome can show it in the notification.
@@ -682,6 +691,172 @@ function createPlayerStore() {
       }
     },
 
+    // Section Points
+    async addSectionPoint(time?: number): Promise<void> {
+      const state = get({ subscribe });
+      const t = time ?? state.currentTime;
+      const current = get(sectionPoints);
+      // Prevent near-duplicate (within 0.5s)
+      if (current.some((sp) => Math.abs(sp.time - t) < 0.5)) return;
+      const next = [...current, { id: `sec-${Date.now()}`, time: t }].sort((a, b) => a.time - b.time);
+      sectionPoints.set(next);
+      if (state.trackId) {
+        const meta = await getTrackMeta(state.trackId);
+        if (meta) await saveTrackMeta({ ...meta, sectionPoints: next });
+      }
+    },
+
+    async deleteSectionPoint(id: string): Promise<void> {
+      const state = get({ subscribe });
+      const next = get(sectionPoints).filter((sp) => sp.id !== id);
+      sectionPoints.set(next);
+      if (state.trackId) {
+        const meta = await getTrackMeta(state.trackId);
+        if (meta) await saveTrackMeta({ ...meta, sectionPoints: next });
+      }
+    },
+
+    async updateSectionPoint(id: string, time: number): Promise<void> {
+      const state = get({ subscribe });
+      const next = get(sectionPoints)
+        .map((sp) => (sp.id === id ? { ...sp, time } : sp))
+        .sort((a, b) => a.time - b.time);
+      sectionPoints.set(next);
+      if (state.trackId) {
+        const meta = await getTrackMeta(state.trackId);
+        if (meta) await saveTrackMeta({ ...meta, sectionPoints: next });
+      }
+    },
+
+    async updateSectionLabel(id: string, label: string): Promise<void> {
+      const state = get({ subscribe });
+      const trimmed = label.trim();
+      const current = get(sectionLabels);
+      const next = trimmed ? { ...current, [id]: trimmed } : Object.fromEntries(Object.entries(current).filter(([k]) => k !== id));
+      sectionLabels.set(next);
+      if (state.trackId) {
+        const meta = await getTrackMeta(state.trackId);
+        if (meta) await saveTrackMeta({ ...meta, sectionLabels: next });
+      }
+    },
+
+    /** Set A-B repeat to the section that contains the given time */
+    loadSectionAtTime(time: number, seekToStart = true): void {
+      const dur = get({ subscribe }).duration;
+      let a = 0;
+      let b = dur;
+      let secId = 'start';
+      for (const sp of get(sectionPoints).sort((x, y) => x.time - y.time)) {
+        if (sp.time <= time) { a = sp.time; secId = sp.id; }
+        else { b = sp.time; break; }
+      }
+      update((s) => ({ ...s, abRepeat: { enabled: true, a, b } }));
+      if (seekToStart) engine.seek(a);
+      activeSectionId.set(secId);
+      activeBookmarkId.set(null);
+    },
+
+    /**
+     * Detect section points from track structure analysis.
+     * Reuses the same API call and cache as autoBookmarks.
+     * Creates a point at each segment boundary (excluding 0 and track end).
+     */
+    async autoDetectSections(): Promise<void> {
+      const state = get({ subscribe });
+      if (!state.trackId || !_currentAudioBuffer) return;
+      const trackId = state.trackId;
+      if (_analyzingStructureTracks.has(trackId)) return;
+
+      _analyzingStructureTracks.add(trackId);
+      analyzingStructureTrackId.set(trackId);
+      try {
+        const cachedMeta = await getTrackMeta(trackId);
+        let segments: { start: number; end: number; label: string }[] | null = null;
+
+        if (cachedMeta?.structureSegments && cachedMeta.structureSegments.length > 0) {
+          segments = cachedMeta.structureSegments;
+        } else {
+          // Fetch from API
+          const apiSettings = get(settingsStore);
+          if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
+            throw new Error('APIが設定されていません');
+          }
+          const audioFile = await getAudioFile(trackId);
+          if (audioFile && audioFile.data.byteLength > 100 * 1024 * 1024) {
+            throw new Error(AI_DURATION_LIMIT_ERROR);
+          }
+          if (!audioFile) return;
+
+          await saveProcessingState({ id: `${trackId}:structure`, trackId, tool: 'structure', startedAt: Date.now() });
+          try {
+            const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
+            const contentHash = cachedMeta?.contentHash;
+
+            const REQUIRED_STEMS = ['bass', 'drums', 'other', 'vocals'] as const;
+            const stemEntries = await Promise.all(
+              REQUIRED_STEMS.map(async (name) => {
+                const buf = await getStemFile(trackId, name);
+                return [name, buf ?? null] as const;
+              }),
+            );
+            const stems = Object.fromEntries(stemEntries.filter(([, buf]) => buf !== null));
+            const hasAllStems = REQUIRED_STEMS.every((name) => stems[name] != null);
+
+            let res: StructureResponse;
+            if (hasAllStems) {
+              res = await client.analyzeStructureWithStems(audioFile.data, stems, contentHash);
+            } else {
+              res = await client.analyzeStructure(audioFile.data, contentHash);
+            }
+            segments = res.segments;
+
+            // Cache structure segments for future use (shared with autoBookmarks)
+            if (get({ subscribe }).trackId !== trackId) return;
+            const meta = await getTrackMeta(trackId);
+            if (meta) await saveTrackMeta({ ...meta, structureSegments: segments });
+          } finally {
+            await deleteProcessingState(`${trackId}:structure`);
+          }
+        }
+
+        if (!segments || get({ subscribe }).trackId !== trackId) return;
+
+        // Create section points at segment boundaries (skip 0, keep internal boundaries)
+        const boundaries = segments
+          .map((s) => s.start)
+          .filter((t) => t > 0.5); // skip near-zero starts
+        const next: SectionPoint[] = boundaries.map((t) => ({ id: `sec-${t.toFixed(2)}`, time: t }));
+
+        // Build sectionLabels from all segments: section 'start' = segments[0].label, others keyed by sp.id
+        const labels: Record<string, string> = {};
+        for (const seg of segments!) {
+          if (seg.label) {
+            const spId = seg.start < 0.5 ? 'start' : `sec-${seg.start.toFixed(2)}`;
+            labels[spId] = seg.label;
+          }
+        }
+
+        sectionPoints.set(next);
+        sectionLabels.set(labels);
+        const meta = await getTrackMeta(trackId);
+        if (meta) await saveTrackMeta({ ...meta, sectionPoints: next, sectionLabels: labels });
+      } finally {
+        _analyzingStructureTracks.delete(trackId);
+        analyzingStructureTrackId.set(null);
+      }
+    },
+
+    async clearSectionPoints(): Promise<void> {
+      const state = get({ subscribe });
+      sectionPoints.set([]);
+      sectionLabels.set({});
+      activeSectionId.set(null);
+      if (state.trackId) {
+        const meta = await getTrackMeta(state.trackId);
+        if (meta) await saveTrackMeta({ ...meta, sectionPoints: [], sectionLabels: {} });
+      }
+    },
+
     // A-B Repeat
     setA() {
       const state = get({ subscribe });
@@ -738,6 +913,11 @@ function createPlayerStore() {
         const clamped = Math.max(0, b !== null ? Math.min(t, b - 0.05) : t);
         return { ...s, abRepeat: { ...s.abRepeat, a: clamped } };
       });
+    },
+
+    /** Set A and B simultaneously (used when a section boundary moves during drag). */
+    setAB(a: number, b: number) {
+      update((s) => ({ ...s, abRepeat: { ...s.abRepeat, a, b } }));
     },
 
     /** Set B point to an explicit time (used by waveform drag — does not clear activeBookmarkId). */

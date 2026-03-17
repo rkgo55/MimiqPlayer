@@ -15,8 +15,6 @@
   /** ID of the bookmark currently being edited, or null */
   let editingId = $state<string | null>(null);
   let editingLabel = $state('');
-  let editingA = $state(0);
-  let editingB = $state(0);
 
   let dragFromIndex = $state<number | null>(null);
   let dragOverIndex = $state<number | null>(null);
@@ -104,13 +102,6 @@
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  /** 小数点1桁付き表示 (編集パネル用) */
-  function formatTimeDec(sec: number): string {
-    const m = Math.floor(sec / 60);
-    const s = (sec % 60).toFixed(1);
-    return `${m}:${s.padStart(4, '0')}`;
-  }
-
   const canSave = $derived(ps.abRepeat.a !== null && ps.abRepeat.b !== null);
 
   async function handleSave() {
@@ -124,8 +115,6 @@
   function startEdit(bm: LoopBookmark) {
     editingId = bm.id;
     editingLabel = bm.label;
-    editingA = bm.a;
-    editingB = bm.b;
   }
 
   function cancelEdit() {
@@ -133,15 +122,8 @@
     editingLabel = '';
   }
 
-  function clampA(v: number, duration: number) {
-    return Math.max(0, Math.min(editingB - 0.1, Math.round(v * 10) / 10));
-  }
-  function clampB(v: number, duration: number) {
-    return Math.max(editingA + 0.1, Math.min(duration, Math.round(v * 10) / 10));
-  }
-
-  async function handleUpdate(id: string) {
-    await playerStore.updateBookmark(id, editingLabel, editingA, editingB);
+  async function handleUpdate(bm: LoopBookmark) {
+    await playerStore.updateBookmark(bm.id, editingLabel, bm.a, bm.b);
     cancelEdit();
   }
 </script>
@@ -277,54 +259,19 @@
 
             <!-- Edit panel (inline) -->
             {#if isEditing}
-              <div class="pl-0 space-y-2 rounded-lg bg-surface p-2.5">
-                <!-- Label -->
+              <div class="ml-6 flex gap-1.5">
                 <input
-                  class="w-full text-xs bg-surface-lighter px-2 py-1.5 rounded border border-primary/30 outline-none text-text placeholder:text-text-muted"
-                  placeholder="名前"
+                  class="flex-1 text-xs bg-surface px-2 py-1.5 rounded border border-primary/40 outline-none text-text placeholder:text-text-muted"
+                  placeholder="ブックマーク名"
                   bind:value={editingLabel}
-                  onkeydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') handleUpdate(bm);
+                    if (e.key === 'Escape') cancelEdit();
+                  }}
                 />
-                <!-- A/B fine tune: ABRepeat と同スタイル -->
-                <div class="flex items-center gap-2">
-                  <!-- A点 -->
-                  <div class="flex-1 flex items-center gap-1 px-2 py-1.5 rounded-lg bg-success/20 text-success border border-success/30">
-                    <span class="font-bold text-sm">A</span>
-                    <span class="flex-1 text-center text-xs font-mono">{formatTimeDec(editingA)}</span>
-                    <div class="flex flex-col gap-0.5">
-                      <button
-                        class="w-5 h-4 flex items-center justify-center rounded text-[10px] bg-success/10 hover:bg-success/30 text-success transition-colors"
-                        onclick={() => { editingA = clampA(editingA + 0.1, ps.duration); }}
-                      >▲</button>
-                      <button
-                        class="w-5 h-4 flex items-center justify-center rounded text-[10px] bg-success/10 hover:bg-success/30 text-success transition-colors"
-                        onclick={() => { editingA = clampA(editingA - 0.1, ps.duration); }}
-                      >▼</button>
-                    </div>
-                  </div>
-                  <!-- Arrow -->
-                  <svg class="w-4 h-4 text-text-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-                  </svg>
-                  <!-- B点 -->
-                  <div class="flex-1 flex items-center gap-1 px-2 py-1.5 rounded-lg bg-danger/20 text-danger border border-danger/30">
-                    <span class="font-bold text-sm">B</span>
-                    <span class="flex-1 text-center text-xs font-mono">{formatTimeDec(editingB)}</span>
-                    <div class="flex flex-col gap-0.5">
-                      <button
-                        class="w-5 h-4 flex items-center justify-center rounded text-[10px] bg-danger/10 hover:bg-danger/30 text-danger transition-colors"
-                        onclick={() => { editingB = clampB(editingB + 0.1, ps.duration); }}
-                      >▲</button>
-                      <button
-                        class="w-5 h-4 flex items-center justify-center rounded text-[10px] bg-danger/10 hover:bg-danger/30 text-danger transition-colors"
-                        onclick={() => { editingB = clampB(editingB - 0.1, ps.duration); }}
-                      >▼</button>
-                    </div>
-                  </div>
-                </div>
                 <button
-                  class="w-full px-2 py-1.5 text-xs rounded bg-primary text-white hover:bg-primary/90 transition-colors"
-                  onclick={() => handleUpdate(bm.id)}
+                  class="px-3 py-1.5 text-xs rounded bg-primary text-white hover:bg-primary/90 transition-colors"
+                  onclick={() => handleUpdate(bm)}
                 >保存</button>
               </div>
             {/if}
