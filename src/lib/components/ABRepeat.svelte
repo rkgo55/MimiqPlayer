@@ -29,6 +29,16 @@
 
 <div class="{bare ? '' : 'bg-surface-light rounded-lg p-3'}">
   <div class="flex items-center gap-2">
+    <!-- ON/OFF toggle (left) -->
+    <button
+      class="px-2 py-0.5 text-xs rounded transition-colors flex-shrink-0
+        {abRepeat.enabled ? 'bg-primary text-white' : 'bg-surface-lighter text-text-muted hover:bg-surface-lighter/80'}"
+      onclick={() => playerStore.toggleABRepeat()}
+      disabled={abRepeat.a === null || abRepeat.b === null}
+    >
+      <span class="inline-block w-6 text-center">{abRepeat.enabled ? 'ON' : 'OFF'}</span>
+    </button>
+
     <!-- Set A -->
     <button
       class="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-sm transition-colors
@@ -54,15 +64,6 @@
     >
       <span class="font-bold">B</span>
       <span class="text-xs">{formatTime(abRepeat.b)}</span>
-    </button>
-
-    <button
-      class="px-2 py-0.5 text-xs rounded transition-colors
-        {abRepeat.enabled ? 'bg-primary text-white' : 'bg-surface-lighter text-text-muted hover:bg-surface-lighter/80'}"
-      onclick={() => playerStore.toggleABRepeat()}
-      disabled={abRepeat.a === null || abRepeat.b === null}
-    >
-      <span class="inline-block w-6 text-center">{abRepeat.enabled ? 'ON' : 'OFF'}</span>
     </button>
 
     <!-- Clear -->

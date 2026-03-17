@@ -45,7 +45,7 @@
     chords.length > 0 ? getCurrentChord(chords, ps.currentTime) : ''
   );
 
-  /** Past chords (last 2 distinct chords before current) */
+  /** Past chords (last 1 distinct chord before current) */
   const pastChords = $derived.by(() => {
     if (chords.length === 0) return [];
     // Find the start time of the current chord segment
@@ -62,10 +62,10 @@
         seen.push(c);
       }
     }
-    return seen.slice(-2);
+    return seen.slice(-1);
   });
 
-  /** Upcoming chords (deduplicate consecutive same chords, show next 2 distinct) */
+  /** Upcoming chords (deduplicate consecutive same chords, show next 3 distinct) */
   const upcomingChords = $derived.by(() => {
     if (chords.length === 0) return [];
     const result: { chord: string; time: number }[] = [];
@@ -75,7 +75,7 @@
       if (c.chord === lastChord || c.chord === 'N') continue;
       result.push(c);
       lastChord = c.chord;
-      if (result.length >= 2) break;
+      if (result.length >= 3) break;
     }
     return result;
   });
@@ -137,20 +137,8 @@
         {#if isDetecting}
           <span class="text-xs text-text-muted/40 animate-pulse">解析中...</span>
         {:else if chords.length > 0}
-          <!-- Past chord slots (always 2, empty if not enough history) -->
-          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.25">
-            {#if pastChords.length >= 2}
-              <div class="text-xs font-semibold text-text leading-none">{displayChord(pastChords[pastChords.length - 2].chord)}</div>
-              <div class="text-[9px] text-text-muted leading-none mt-0.5">-{Math.floor(ps.currentTime - pastChords[pastChords.length - 2].time)}s</div>
-            {:else}
-              <div class="text-xs leading-none">&nbsp;</div>
-              <div class="text-[9px] leading-none mt-0.5">&nbsp;</div>
-            {/if}
-          </div>
-          <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
-          </svg>
-          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.55">
+          <!-- Past chord slot (1, empty if not enough history) -->
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.45">
             {#if pastChords.length >= 1}
               <div class="text-xs font-semibold text-text leading-none">{displayChord(pastChords[pastChords.length - 1].chord)}</div>
               <div class="text-[9px] text-text-muted leading-none mt-0.5">-{Math.floor(ps.currentTime - pastChords[pastChords.length - 1].time)}s</div>
@@ -172,11 +160,11 @@
             {/if}
           </div>
 
-          <!-- Upcoming chord slots (always 2, empty if not enough) -->
+          <!-- Upcoming chord slots (3, empty if not enough) -->
           <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
           </svg>
-          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.55">
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.65">
             {#if upcomingChords.length >= 1}
               <div class="text-xs font-semibold text-text leading-none">{displayChord(upcomingChords[0].chord)}</div>
               <div class="text-[9px] text-text-muted leading-none mt-0.5">{Math.ceil(upcomingChords[0].time - ps.currentTime)}s</div>
@@ -185,10 +173,19 @@
           <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
           </svg>
-          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.25">
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.35">
             {#if upcomingChords.length >= 2}
               <div class="text-xs font-semibold text-text leading-none">{displayChord(upcomingChords[1].chord)}</div>
               <div class="text-[9px] text-text-muted leading-none mt-0.5">{Math.ceil(upcomingChords[1].time - ps.currentTime)}s</div>
+            {/if}
+          </div>
+          <svg class="w-2 h-2 text-text-muted/20 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
+          </svg>
+          <div class="w-10 flex flex-col items-center flex-shrink-0" style="opacity: 0.18">
+            {#if upcomingChords.length >= 3}
+              <div class="text-xs font-semibold text-text leading-none">{displayChord(upcomingChords[2].chord)}</div>
+              <div class="text-[9px] text-text-muted leading-none mt-0.5">{Math.ceil(upcomingChords[2].time - ps.currentTime)}s</div>
             {/if}
           </div>
         {:else}

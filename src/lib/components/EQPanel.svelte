@@ -40,42 +40,12 @@
 </script>
 
 <div class="bg-surface-light p-3 space-y-3">
-  <div class="flex items-center justify-between">
-    <span class="text-xs text-text-muted font-medium">10バンドEQ</span>
-    <div class="flex items-center gap-2">
-      {#if !isFlat}
-        <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary">変更中</span>
-      {/if}
-      <button
-        class="text-[10px] px-2 py-1 rounded bg-surface-lighter text-text-muted hover:bg-surface-lighter/80 transition-colors"
-        onclick={() => applyPreset('flat')}
-      >
-        リセット
-      </button>
-    </div>
-  </div>
-
-  <!-- Preset buttons -->
-  <div class="flex gap-1.5">
-    {#each PRESETS as preset}
-      <button
-        class="flex-1 py-1 text-xs rounded transition-colors
-          {JSON.stringify([...eq]) === JSON.stringify([...EQ_PRESETS[preset.key]])
-            ? 'bg-primary text-white'
-            : 'bg-surface-lighter text-text-muted hover:bg-surface-lighter/80'}"
-        onclick={() => applyPreset(preset.key)}
-      >
-        {preset.label}
-      </button>
-    {/each}
-  </div>
-
   <!-- 10 Band Sliders -->
   <div class="flex items-end gap-1">
     {#each BANDS as band, i}
       <div class="flex-1 flex flex-col items-center gap-1">
         <!-- Vertical slider wrapper -->
-        <div class="relative h-24 w-full flex items-center justify-center">
+        <div class="relative h-36 w-full flex items-center justify-center">
           <!-- Track background -->
           <div class="absolute inset-x-[45%] inset-y-0 rounded-full bg-surface-lighter"></div>
           <!-- Center marker line -->
@@ -127,5 +97,20 @@
     <span>-12dB</span>
     <span>0</span>
     <span>+12dB</span>
+  </div>
+
+  <!-- Preset buttons -->
+  <div class="flex gap-1.5">
+    {#each PRESETS as preset}
+      <button
+        class="flex-1 py-1 text-xs rounded transition-colors
+          {JSON.stringify([...eq]) === JSON.stringify([...EQ_PRESETS[preset.key]])
+            ? 'bg-primary text-white'
+            : 'bg-surface-lighter text-text-muted hover:bg-surface-lighter/80'}"
+        onclick={() => applyPreset(preset.key)}
+      >
+        {preset.label}
+      </button>
+    {/each}
   </div>
 </div>

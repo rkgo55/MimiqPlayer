@@ -45,8 +45,8 @@
       }
     }
   });
-  let showEQ = $state(false);
-  let showStems = $state(false);
+  let showMixer = $state(false);
+  let mixerTab = $state<'stem' | 'eq'>('stem');
   let editingTrackInfo = $state(false);
   let editTitle = $state('');
   let editArtist = $state('');
@@ -450,69 +450,59 @@
       {/if}
     </div>
 
-    <!-- EQ -->
+    <!-- Mixer (EQ + Stem) -->
     <div class="rounded-lg overflow-hidden">
       <button
         class="w-full flex items-center justify-between px-3 py-2 text-sm transition-colors
-          {showEQ
+          {showMixer
             ? 'bg-primary/15 text-primary'
-            : isEQModified
+            : isEQModified || isStemsActive
               ? 'bg-surface-lighter text-text'
               : 'bg-surface-light text-text-muted hover:bg-surface-lighter hover:text-text'}"
-        onclick={() => (showEQ = !showEQ)}
+        onclick={() => (showMixer = !showMixer)}
       >
         <span class="flex items-center gap-2">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 7h4m0 0a2 2 0 1 0 4 0m-4 0a2 2 0 1 1 4 0m0 0h10M3 12h10m0 0a2 2 0 1 0 4 0m-4 0a2 2 0 1 1 4 0m0 0h4M3 17h4m0 0a2 2 0 1 0 4 0m-4 0a2 2 0 1 1 4 0m0 0h10" />
           </svg>
-          <span>EQ</span>
-          {#if isEQModified}
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary leading-none">変更中</span>
-          {/if}
-        </span>
-        <svg
-          class="w-4 h-4 transition-transform duration-200 {showEQ ? 'rotate-180' : ''}"
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" d="m19 9-7 7-7-7" />
-        </svg>
-      </button>
-      {#if showEQ}
-        <EQPanel />
-      {/if}
-    </div>
-
-    <!-- Stem Mixer -->
-    <div class="rounded-lg overflow-hidden">
-      <button
-        class="w-full flex items-center justify-between px-3 py-2 text-sm transition-colors
-          {showStems
-            ? 'bg-primary/15 text-primary'
-            : isStemsActive
-              ? 'bg-surface-lighter text-text'
-              : 'bg-surface-light text-text-muted hover:bg-surface-lighter hover:text-text'}"
-        onclick={() => (showStems = !showStems)}
-      >
-        <span class="flex items-center gap-2">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
-          </svg>
-          <span>ステムミキサー</span>
+          <span>ミキサー</span>
           {#if stemState.status === 'ready'}
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary leading-none">分離済み</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary leading-none">ステム分離済み</span>
           {:else if stemState.status === 'processing'}
             <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 leading-none">処理中</span>
           {/if}
+          {#if isEQModified}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary leading-none">EQ変更中</span>
+          {/if}
         </span>
         <svg
-          class="w-4 h-4 transition-transform duration-200 {showStems ? 'rotate-180' : ''}"
+          class="w-4 h-4 transition-transform duration-200 {showMixer ? 'rotate-180' : ''}"
           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="m19 9-7 7-7-7" />
         </svg>
       </button>
-      {#if showStems}
-        <StemMixer />
+      {#if showMixer}
+        <div class="bg-surface-light border-t border-white/5">
+          <!-- Tab bar -->
+          <div class="flex items-center gap-0.5 bg-surface mx-3 mt-3 rounded-lg p-0.5">
+            <button
+              class="flex-1 py-1 text-xs rounded-md transition-colors font-medium
+                {mixerTab === 'stem' ? 'bg-surface-lighter text-text shadow-sm' : 'text-text-muted hover:text-text'}"
+              onclick={() => (mixerTab = 'stem')}
+            >ステム</button>
+            <button
+              class="flex-1 py-1 text-xs rounded-md transition-colors font-medium
+                {mixerTab === 'eq' ? 'bg-surface-lighter text-text shadow-sm' : 'text-text-muted hover:text-text'}"
+              onclick={() => (mixerTab = 'eq')}
+            >EQ</button>
+          </div>
+          {#if mixerTab === 'stem'}
+            <StemMixer />
+          {:else}
+            <EQPanel />
+          {/if}
+        </div>
       {/if}
     </div>
   </div>
