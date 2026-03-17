@@ -230,7 +230,7 @@ function createPlayerStore() {
       if (state.abRepeat.enabled && state.abRepeat.b !== null) {
         const currentTime = engine.currentTime;
         if (currentTime >= state.abRepeat.b) {
-          engine.seek(state.abRepeat.a ?? 0);
+          engine.seek(Math.max(0, (state.abRepeat.a ?? 0) - (get(settingsStore).loopOffset ?? 0)));
         }
       }
     }, 50);
@@ -483,7 +483,9 @@ function createPlayerStore() {
 
     skip(seconds: number) {
       const state = get({ subscribe });
-      const floor = (seconds < 0 && state.abRepeat.a !== null) ? state.abRepeat.a : 0;
+      const floor = (seconds < 0 && state.abRepeat.a !== null)
+        ? Math.max(0, state.abRepeat.a - (get(settingsStore).loopOffset ?? 0))
+        : 0;
       const newTime = Math.max(floor, Math.min(state.duration, state.currentTime + seconds));
       this.seek(newTime);
     },
@@ -696,9 +698,10 @@ function createPlayerStore() {
     loadBookmark(bookmark: LoopBookmark) {
       update((s) => ({
         ...s,
-        abRepeat: { enabled: true, a: bookmark.a, b: bookmark.b },
+        abRepeat: { ...s.abRepeat, enabled: true, a: bookmark.a, b: bookmark.b },
       }));
       engine.seek(bookmark.a);
+      activeSectionId.set(null);
       activeBookmarkId.set(bookmark.id);
     },
 
@@ -772,7 +775,7 @@ function createPlayerStore() {
         if (sp.time <= time) { a = sp.time; secId = sp.id; }
         else { b = sp.time; break; }
       }
-      update((s) => ({ ...s, abRepeat: { enabled: true, a, b } }));
+      update((s) => ({ ...s, abRepeat: { ...s.abRepeat, enabled: true, a, b } }));
       if (seekToStart) engine.seek(a);
       activeSectionId.set(secId);
       activeBookmarkId.set(null);
@@ -890,7 +893,7 @@ function createPlayerStore() {
         if (b !== null && time > b) {
           return {
             ...s,
-            abRepeat: { enabled: true, a: b, b: time },
+            abRepeat: { ...s.abRepeat, enabled: true, a: b, b: time },
           };
         }
         return {
@@ -918,7 +921,7 @@ function createPlayerStore() {
         if (a !== null && bTime < a) {
           return {
             ...s,
-            abRepeat: { enabled: true, a: bTime, b: a },
+            abRepeat: { ...s.abRepeat, enabled: true, a: bTime, b: a },
           };
         }
         return {
@@ -1019,6 +1022,7 @@ function createPlayerStore() {
 
     clearAB() {
       activeBookmarkId.set(null);
+      activeSectionId.set(null);
       update((s) => ({
         ...s,
         abRepeat: { enabled: false, a: null, b: null },

@@ -313,9 +313,7 @@
       if (pinchStartDist > 0) {
         const scale = dist / pinchStartDist;
         const newZoom = Math.max(1, Math.min(16, pinchStartZoom * scale));
-        const newRange = 1 / newZoom;
-        const anchorFrac = pinchStartOffset + 0.5 * (1 / pinchStartZoom);
-        zoomOffset = Math.max(0, Math.min(1 - newRange, anchorFrac - 0.5 * newRange));
+        zoomOffset = newZoom === 1 ? 0 : playheadOffsetForZoom(newZoom);
         zoomLevel = newZoom;
         requestAnimationFrame(draw);
       }
@@ -431,14 +429,9 @@
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     if (!waveformData || !container) return;
-    const rect = container.getBoundingClientRect();
-    const cx = (e.clientX - rect.left) / rect.width;
-    const { start: vs, end: ve } = visibleRange();
-    const anchorFrac = vs + cx * (ve - vs);
     const zoomFactor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
     const newZoom = Math.max(1, Math.min(16, zoomLevel * zoomFactor));
-    const newRange = 1 / newZoom;
-    zoomOffset = Math.max(0, Math.min(1 - newRange, anchorFrac - cx * newRange));
+    zoomOffset = newZoom === 1 ? 0 : playheadOffsetForZoom(newZoom);
     zoomLevel = newZoom;
   }
 
@@ -492,24 +485,23 @@
     scrollbarDragging = false;
   }
 
+  function playheadOffsetForZoom(newZoom: number): number {
+    const dur = waveformData?.duration ?? 0;
+    const pf = dur > 0 ? playerState.currentTime / dur : 0.5;
+    const range = 1 / newZoom;
+    return Math.max(0, Math.min(1 - range, pf - range / 2));
+  }
+
   function zoomIn() {
     const newZoom = Math.min(16, zoomLevel * 1.5);
-    const range = 1 / newZoom;
-    const center = zoomOffset + 1 / zoomLevel / 2;
-    zoomOffset = Math.max(0, Math.min(1 - range, center - range / 2));
+    zoomOffset = playheadOffsetForZoom(newZoom);
     zoomLevel = newZoom;
     requestAnimationFrame(draw);
   }
 
   function zoomOut() {
     const newZoom = Math.max(1, zoomLevel / 1.5);
-    if (newZoom === 1) {
-      zoomOffset = 0;
-    } else {
-      const range = 1 / newZoom;
-      const center = zoomOffset + 1 / zoomLevel / 2;
-      zoomOffset = Math.max(0, Math.min(1 - range, center - range / 2));
-    }
+    zoomOffset = newZoom === 1 ? 0 : playheadOffsetForZoom(newZoom);
     zoomLevel = newZoom;
     requestAnimationFrame(draw);
   }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { playerStore } from '../stores/playerStore';
-  import type { PlayerState } from '../types';
+  import { settingsStore } from '../stores/settingsStore';
+  import type { PlayerState, AppSettings } from '../types';
 
   let { bare = false }: { bare?: boolean } = $props();
 
@@ -14,8 +15,12 @@
     volume: 1,
     abRepeat: { enabled: false, a: null, b: null },
   });
+  let settings: AppSettings = $state({ skipDuration: 5, loopOffset: 0, defaultSpeed: 1, defaultPitch: 0, keepAwake: false, apiEndpoint: '', apiKey: '' });
 
   playerStore.subscribe((v) => (ps = v));
+  settingsStore.subscribe((v) => (settings = v));
+
+  const loopOffsetOptions = [0, 1, 2, 3, 5];
 
   function formatTime(sec: number | null): string {
     if (sec === null || !isFinite(sec)) return '--:--';
@@ -74,5 +79,19 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
       </svg>
     </button>
+  </div>
+
+  <!-- Loop offset -->
+  <div class="flex items-center gap-1.5 mt-2">
+    <div class="flex gap-1">
+      {#each loopOffsetOptions as opt}
+        <button
+          class="px-1.5 py-0.5 text-xs rounded transition-colors
+            {settings.loopOffset === opt ? 'bg-primary/25 text-primary' : 'bg-surface-lighter text-text-muted hover:bg-surface-lighter/80'}"
+          onclick={() => settingsStore.setLoopOffset(opt)}
+        >{opt}s</button>
+      {/each}
+    </div>
+    <span class="text-xs text-text-muted">前から再生</span>
   </div>
 </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { playerStore } from '../stores/playerStore';
   import type { PlayerState, LoopBookmark } from '../types';
+  import { confirmPaused } from '../utils/confirmPaused';
 
   let { bare = false, isAdding = $bindable(false) }: { bare?: boolean; isAdding?: boolean } = $props();
 
@@ -240,7 +241,7 @@
               <button
                 class="flex-shrink-0 p-1 rounded hover:bg-danger/15 text-text-muted/50 hover:text-danger transition-all"
                 onclick={() => {
-                  if (confirm(`「${bm.label}」を削除しますか？`)) {
+                  if (confirmPaused(`「${bm.label}」を削除しますか？`)) {
                     playerStore.deleteBookmark(bm.id);
                   }
                 }}

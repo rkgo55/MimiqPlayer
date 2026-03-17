@@ -1,6 +1,7 @@
 <script lang="ts">
   import { trackStore, selectedTrack } from '../stores/trackStore';
   import { playerStore } from '../stores/playerStore';
+  import { confirmPaused } from '../utils/confirmPaused';
   import type { TrackMeta } from '../types';
 
   let tracks: TrackMeta[] = $state([]);
@@ -16,7 +17,7 @@
 
   async function removeTrack(e: Event, id: string) {
     e.stopPropagation();
-    if (confirm('このトラックを削除しますか？')) {
+    if (confirmPaused('このトラックを削除しますか？')) {
       await trackStore.deleteTrack(id);
     }
   }

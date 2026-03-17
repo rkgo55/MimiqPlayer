@@ -1,13 +1,14 @@
 <script lang="ts">
   import { trackStore } from '../stores/trackStore';
   import { settingsStore } from '../stores/settingsStore';
+  import { confirmPaused } from '../utils/confirmPaused';
   import type { AppSettings } from '../types';
   import { getStorageEstimate, deleteAllTracks } from '../storage/db';
   import { tutorialStore } from '../stores/uiStore';
 
   let isOpen = $state(false);
   let storage = $state({ usedMB: 0, quotaMB: 0, ratio: 0 });
-  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, keepAwake: false, apiEndpoint: '', apiKey: '' });
+  let settings: AppSettings = $state({ skipDuration: 5, loopOffset: 0, defaultSpeed: 1, defaultPitch: 0, keepAwake: false, apiEndpoint: '', apiKey: '' });
   const baseUrl = import.meta.env.BASE_URL;
   const builtInEndpoint = import.meta.env.VITE_API_ENDPOINT ?? '';
   const builtInApiKey = import.meta.env.VITE_API_KEY ?? '';
@@ -19,7 +20,7 @@
   }
 
   async function handleDeleteAll() {
-    if (!confirm('すべてのトラックとデータを削除しますか？\nこの操作は取り消せません。')) return;
+    if (!confirmPaused('すべてのトラックとデータを削除しますか？\nこの操作は取り消せません。')) return;
     await deleteAllTracks();
     trackStore.select(null);
     await trackStore.load();

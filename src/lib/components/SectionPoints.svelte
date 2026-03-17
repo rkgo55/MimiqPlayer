@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { playerStore, analyzingStructureTrackId as analyzingStructureTrackIdStore, activeSectionId, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
+  import { playerStore, analyzingStructureTrackId as analyzingStructureTrackIdStore, activeSectionId, activeBookmarkId, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
   import { apiKeyModalStore } from '../stores/uiStore';
   import { stemStore, type StemState } from '../stores/stemStore';
   import { get } from 'svelte/store';
   import type { PlayerState, SectionPoint } from '../types';
+  import { confirmPaused } from '../utils/confirmPaused';
 
   let ps: PlayerState = $state({
     trackId: null, isPlaying: false, currentTime: 0, duration: 0,
@@ -20,11 +21,14 @@
   let editingId = $state<string | null>(null);
   let editingLabel = $state('');
   let activeSectionIdValue: string | null = $state(null);
+  let activeBookmarkIdValue: string | null = $state(null);
   activeSectionId.subscribe((v) => (activeSectionIdValue = v));
+  activeBookmarkId.subscribe((v) => (activeBookmarkIdValue = v));
 
   // Auto-select the section containing the current playhead when sections first become available
+  // Skip auto-select if a bookmark is already active (bookmark takes priority)
   $effect(() => {
-    if (sections.length > 1 && activeSectionIdValue === null) {
+    if (sections.length > 1 && activeSectionIdValue === null && activeBookmarkIdValue === null) {
       playerStore.loadSectionAtTime(ps.currentTime, false);
     }
   });
@@ -90,6 +94,9 @@
       return;
     }
     stemNotReady = false;
+    if (sectionPoints.length > 0) {
+      if (!confirmPaused('既存のセクションは上書きされます。続けますか？')) return;
+    }
     autoDetectError = null;
     try {
       await playerStore.autoDetectSections();
@@ -249,7 +256,7 @@
               {#if !isFirst && sp}
                 <button
                   class="flex-shrink-0 p-1 rounded hover:bg-danger/15 text-text-muted/50 hover:text-danger transition-all"
-                  onclick={() => { if (confirm('このセクションの区切りを削除しますか？')) playerStore.deleteSectionPoint(sp.id); }}
+                  onclick={() => { if (confirmPaused('このセクションの区切りを削除しますか？')) playerStore.deleteSectionPoint(sp.id); }}
                   title="このセクションを削除"
                 >
                   <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

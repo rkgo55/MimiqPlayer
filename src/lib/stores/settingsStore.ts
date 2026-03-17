@@ -36,6 +36,9 @@ function createSettingsStore() {
     setSkipDuration(seconds: number) {
       this.update((s) => ({ ...s, skipDuration: seconds }));
     },
+    setLoopOffset(seconds: number) {
+      this.update((s) => ({ ...s, loopOffset: seconds }));
+    },
     setApi(endpoint: string, key: string) {
       this.update((s) => ({ ...s, apiEndpoint: endpoint.trim(), apiKey: key.trim() }));
     },

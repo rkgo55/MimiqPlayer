@@ -8,7 +8,7 @@
   import FileUpload from './lib/components/FileUpload.svelte';
   import TrackList from './lib/components/TrackList.svelte';
   import Player from './lib/components/Player.svelte';
-  import { getStaleProcessingStates, deleteProcessingState, getProcessingState } from './lib/storage/db';
+  import { getStaleProcessingStates, deleteProcessingState, getProcessingState, getTrackMeta } from './lib/storage/db';
 
   import { settingsStore } from './lib/stores/settingsStore';
   import Tutorial from './lib/components/Tutorial.svelte';
@@ -18,13 +18,34 @@
     await trackStore.load();
 
     // Restore the previously selected track from the URL hash
-    const hash = window.location.hash.slice(1); // strip leading '#'
-    if (hash) {
+    const raw = window.location.hash.slice(1); // strip leading '#'
+    const trackId = raw.split(';')[0];
+    if (trackId) {
       const tracks = get(trackStore);
-      const match = tracks.find((t) => t.id === hash);
+      const match = tracks.find((t) => t.id === trackId);
       if (match) {
+        const hashParams: Record<string, string> = {};
+        for (const seg of raw.split(';').slice(1)) {
+          const eq = seg.indexOf('=');
+          if (eq > 0) hashParams[seg.slice(0, eq)] = decodeURIComponent(seg.slice(eq + 1));
+        }
+
         trackStore.select(match.id);
         await playerStore.loadTrack(match.id);
+
+        // Restore active bookmark or section (mutually exclusive; bookmark takes priority).
+        // Read directly from DB — the store's bookmarks/sectionPoints load asynchronously
+        // in the background after loadTrack() resolves, so get() may return stale empty arrays.
+        const trackMeta = await getTrackMeta(match.id);
+        if (hashParams.bookmark) {
+          const bm = trackMeta?.bookmarks?.find((b) => b.id === hashParams.bookmark);
+          if (bm) playerStore.loadBookmark(bm);
+        } else if (hashParams.section) {
+          const secId = hashParams.section;
+          const sp = trackMeta?.sectionPoints?.find((s) => s.id === secId);
+          const seekTime = sp ? sp.time + 0.001 : (secId === 'start' ? 0 : null);
+          if (seekTime !== null) playerStore.loadSectionAtTime(seekTime, false);
+        }
 
         // Resume interrupted API operations on reload.
         // No time-limit check — the server cache means re-firing is safe and instant on hit.

@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { selectedTrack, trackStore } from '../stores/trackStore';
-  import { playerStore, activeSectionId, trimStart as trimStartStore, trimEnd as trimEndStore } from '../stores/playerStore';
+  import { playerStore, activeSectionId, activeBookmarkId, trimStart as trimStartStore, trimEnd as trimEndStore } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
   import { apiKeyModalStore } from '../stores/uiStore';
   import { stemStore, type StemState } from '../stores/stemStore';
   import { get } from 'svelte/store';
+  import { getTrackMeta } from '../storage/db';
   import Waveform from './Waveform.svelte';
   import Controls from './Controls.svelte';
   import SpeedPitch from './SpeedPitch.svelte';
@@ -23,18 +25,81 @@
   apiKeyModalStore.subscribe((v) => (showApiKeyModal = v));
 
   let track: TrackMeta | null = $state(null);
-  let settings: AppSettings = $state({ skipDuration: 5, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-6s', keepAwake: false, apiEndpoint: '', apiKey: '' });
+  let settings: AppSettings = $state({ skipDuration: 5, loopOffset: 0, defaultSpeed: 1, defaultPitch: 0, stemModel: 'htdemucs-6s', keepAwake: false, apiEndpoint: '', apiKey: '' });
   let ps: PlayerState = $state({
     trackId: null, isPlaying: false, currentTime: 0, duration: 0,
     speed: 1, pitch: 0, volume: 1,
     abRepeat: { enabled: false, a: null, b: null },
   });
+
+  // --- URL hash helpers ---
+  function parseHashParams(): Record<string, string> {
+    const raw = window.location.hash.slice(1);
+    const parts = raw.split(';');
+    const p: Record<string, string> = {};
+    for (const seg of parts.slice(1)) {
+      const eq = seg.indexOf('=');
+      if (eq > 0) p[seg.slice(0, eq)] = decodeURIComponent(seg.slice(eq + 1));
+    }
+    return p;
+  }
+  const _initHash = parseHashParams();
+
+  async function restoreFromHash(hash: string) {
+    const parts = hash.slice(1).split(';');
+    const newTrackId = parts[0];
+    const params: Record<string, string> = {};
+    for (const seg of parts.slice(1)) {
+      const eq = seg.indexOf('=');
+      if (eq > 0) params[seg.slice(0, eq)] = decodeURIComponent(seg.slice(eq + 1));
+    }
+
+    // Load track if changed
+    if (newTrackId && newTrackId !== ps.trackId) {
+      const match = get(trackStore).find((t) => t.id === newTrackId);
+      if (!match) return;
+      trackStore.select(match.id);
+      await playerStore.loadTrack(match.id);
+    }
+
+    // Restore local UI state
+    repeatTab = params.rtab === 'section' ? 'section' : 'ab';
+    showBookmarks = params.bm === '1';
+    showMixer = params.mixer === '1';
+    mixerTab = params.mtab === 'eq' ? 'eq' : 'stem';
+
+    // Restore active bookmark or section (mutually exclusive; bookmark takes priority).
+    // Read from DB to avoid race with the async metadata load inside loadTrack().
+    if (params.bookmark || params.section) {
+      const trackId = newTrackId || ps.trackId;
+      const trackMeta = trackId ? await getTrackMeta(trackId) : null;
+      if (params.bookmark) {
+        const bm = trackMeta?.bookmarks?.find((b) => b.id === params.bookmark);
+        if (bm) playerStore.loadBookmark(bm);
+      } else if (params.section) {
+        const secId = params.section;
+        const sp = trackMeta?.sectionPoints?.find((s) => s.id === secId);
+        const seekTime = sp ? sp.time + 0.001 : (secId === 'start' ? 0 : null);
+        if (seekTime !== null) playerStore.loadSectionAtTime(seekTime, false);
+      }
+    }
+  }
+
+  onMount(() => {
+    // Respond to external hash changes (browser back/forward, URL paste)
+    const onHashChange = () => void restoreFromHash(window.location.hash);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  });
+
   let showPlaySettings = $state(false);
-  let showBookmarks = $state(false);
+  let showBookmarks = $state(_initHash.bm === '1');
   let bookmarksIsAdding = $state(false);
-  let repeatTab = $state<'ab' | 'section'>('ab');
+  let repeatTab = $state<'ab' | 'section'>(_initHash.rtab === 'section' ? 'section' : 'ab');
   let _activeSectionId: string | null = $state(null);
+  let _activeBookmarkId: string | null = $state(null);
   activeSectionId.subscribe((v) => (_activeSectionId = v));
+  activeBookmarkId.subscribe((v) => (_activeBookmarkId = v));
 
   // セクションタブが開いているときは常にリピートを有効化
   $effect(() => {
@@ -45,8 +110,24 @@
       }
     }
   });
-  let showMixer = $state(false);
-  let mixerTab = $state<'stem' | 'eq'>('stem');
+
+  // Hash sync: update URL whenever relevant UI state changes
+  $effect(() => {
+    if (!ps.trackId) return;
+    const parts: string[] = [ps.trackId];
+    if (repeatTab !== 'ab') parts.push(`rtab=${repeatTab}`);
+    if (showBookmarks) parts.push('bm=1');
+    if (showMixer) parts.push('mixer=1');
+    if (showMixer && mixerTab !== 'stem') parts.push(`mtab=${mixerTab}`);
+    if (_activeBookmarkId) parts.push(`bookmark=${encodeURIComponent(_activeBookmarkId)}`);
+    // Don't include 'start' — it's the implicit default and gets auto-selected on reload anyway
+    if (_activeSectionId && _activeSectionId !== 'start') parts.push(`section=${encodeURIComponent(_activeSectionId)}`);
+    const next = '#' + parts.join(';');
+    if (next !== window.location.hash) history.replaceState(null, '', next);
+  });
+
+  let showMixer = $state(_initHash.mixer === '1');
+  let mixerTab = $state<'stem' | 'eq'>(_initHash.mtab === 'eq' ? 'eq' : 'stem');
   let editingTrackInfo = $state(false);
   let editTitle = $state('');
   let editArtist = $state('');
@@ -348,7 +429,6 @@
       </button>
       {#if showPlaySettings}
         <div class="p-2 space-y-2 bg-surface-light">
-          <SpeedPitch />
           <!-- Skip duration -->
           <div class="bg-surface-light rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
@@ -367,6 +447,7 @@
               {/each}
             </div>
           </div>
+          <SpeedPitch />
           <!-- Keep awake toggle -->
           <div class="flex items-center justify-between bg-surface-light rounded-lg px-3 py-2">
             <div>

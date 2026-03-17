@@ -16,6 +16,7 @@
 
   let settings: AppSettings = $state({
     skipDuration: 5,
+    loopOffset: 0,
     defaultSpeed: 1,
     defaultPitch: 0,
     keepAwake: false,

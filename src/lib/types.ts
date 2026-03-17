@@ -92,6 +92,7 @@ export interface ChordInfo {
 /** App settings */
 export interface AppSettings {
   skipDuration: number; // seconds
+  loopOffset: number; // seconds before A to seek when looping
   defaultSpeed: number;
   defaultPitch: number; // semitones
   /** Keep the screen awake even when not playing */
@@ -153,6 +154,7 @@ export interface WaveformData {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   skipDuration: 5,
+  loopOffset: 0,
   defaultSpeed: 1.0,
   defaultPitch: 0,
   keepAwake: false,

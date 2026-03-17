@@ -53,9 +53,6 @@ function createTrackStore() {
     /** Select a track for playback */
     select(id: string | null) {
       selectedId.set(id);
-      if (typeof window !== 'undefined') {
-        window.location.hash = id ?? '';
-      }
     },
 
     /** Update the stem status for a track (in-memory only; DB is updated separately) */
