@@ -320,6 +320,13 @@ function createPlayerStore() {
           _currentTrackMeta.coverArt,
         );
 
+        // Restore per-track speed and pitch
+        const savedSpeed = meta?.speed ?? 1.0;
+        const savedPitch = meta?.pitch ?? 0;
+        engine.setSpeed(savedSpeed);
+        engine.setPitch(savedPitch);
+        update((s) => ({ ...s, speed: savedSpeed, pitch: savedPitch }));
+
         // Restore per-track EQ (fallback to global localStorage value, then flat)
         const savedEQ = meta?.eq ?? loadEQFromStorage();
         engine.setEQ(savedEQ);
@@ -484,11 +491,25 @@ function createPlayerStore() {
     setSpeed(speed: number) {
       engine.setSpeed(speed);
       update((s) => ({ ...s, speed }));
+      const state = get({ subscribe });
+      if (state.trackId) {
+        void getTrackMeta(state.trackId).then((meta) => {
+          if (!meta) return;
+          return saveTrackMeta({ ...meta, speed });
+        });
+      }
     },
 
     setPitch(semitones: number) {
       engine.setPitch(semitones);
       update((s) => ({ ...s, pitch: semitones }));
+      const state = get({ subscribe });
+      if (state.trackId) {
+        void getTrackMeta(state.trackId).then((meta) => {
+          if (!meta) return;
+          return saveTrackMeta({ ...meta, pitch: semitones });
+        });
+      }
     },
 
     setVolume(volume: number) {

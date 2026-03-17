@@ -65,6 +65,10 @@ export interface TrackMeta {
   stemVolumes?: StemVolumes;
   /** Manual sort order (lower = higher in list); undefined = sort by addedAt */
   order?: number;
+  /** Saved playback speed (0.5–2.0) */
+  speed?: number;
+  /** Saved pitch in semitones */
+  pitch?: number;
 }
 
 /** Processing tool types for tracking in-progress AI work */

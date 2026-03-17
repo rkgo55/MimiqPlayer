@@ -18,6 +18,17 @@ html, body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   /* ダブルタップズームを無効にする */
   touch-action: manipulation;
+  /* 長押しによるテキスト選択を防止 */
+  -webkit-user-select: none;
+  user-select: none;
+  /* iOS Safari の長押しコンテキストメニュー（コピー・選択）を防止 */
+  -webkit-touch-callout: none;
+}
+
+* {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #app {

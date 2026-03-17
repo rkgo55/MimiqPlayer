@@ -491,6 +491,28 @@
   function handleScrollbarUp() {
     scrollbarDragging = false;
   }
+
+  function zoomIn() {
+    const newZoom = Math.min(16, zoomLevel * 1.5);
+    const range = 1 / newZoom;
+    const center = zoomOffset + 1 / zoomLevel / 2;
+    zoomOffset = Math.max(0, Math.min(1 - range, center - range / 2));
+    zoomLevel = newZoom;
+    requestAnimationFrame(draw);
+  }
+
+  function zoomOut() {
+    const newZoom = Math.max(1, zoomLevel / 1.5);
+    if (newZoom === 1) {
+      zoomOffset = 0;
+    } else {
+      const range = 1 / newZoom;
+      const center = zoomOffset + 1 / zoomLevel / 2;
+      zoomOffset = Math.max(0, Math.min(1 - range, center - range / 2));
+    }
+    zoomLevel = newZoom;
+    requestAnimationFrame(draw);
+  }
 </script>
 
 <div class="w-full px-3">
@@ -515,27 +537,39 @@
   >
     <canvas id="waveform-canvas" bind:this={canvas} class="w-full h-full"></canvas>
   </div>
-  {#if zoomLevel > 1}
-  <div
-    bind:this={scrollbarTrack}
-    class="relative w-full h-2 mt-2.5 rounded-full bg-surface-light overflow-hidden cursor-pointer touch-none"
-    onpointerdown={handleScrollbarDown}
-    onpointermove={handleScrollbarMove}
-    onpointerup={handleScrollbarUp}
-    onpointercancel={handleScrollbarUp}
-    role="scrollbar"
-    aria-controls="waveform-canvas"
-    aria-orientation="horizontal"
-    aria-valuenow={scrollThumbLeft}
-    aria-valuemin={0}
-    aria-valuemax={100}
-    tabindex="-1"
-  >
+  <div class="flex items-center gap-1.5 mt-2">
+    <button
+      class="flex-none w-3.5 h-3.5 flex items-center justify-center rounded bg-surface-light text-text-muted hover:text-text hover:bg-surface-lighter active:bg-surface-lighter transition-colors text-[9px] leading-none"
+      onclick={zoomOut}
+      disabled={zoomLevel <= 1}
+      aria-label="縮小"
+    >−</button>
     <div
-      class="absolute h-full rounded-full bg-indigo-500/60 hover:bg-indigo-500/80 transition-colors"
-      style="left: {scrollThumbLeft}%; width: {scrollThumbWidth}%"
-    ></div>
+      bind:this={scrollbarTrack}
+      class="relative flex-1 h-1.5 rounded-full bg-surface-light overflow-hidden cursor-pointer touch-none"
+      onpointerdown={handleScrollbarDown}
+      onpointermove={handleScrollbarMove}
+      onpointerup={handleScrollbarUp}
+      onpointercancel={handleScrollbarUp}
+      role="scrollbar"
+      aria-controls="waveform-canvas"
+      aria-orientation="horizontal"
+      aria-valuenow={scrollThumbLeft}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      tabindex="-1"
+    >
+      <div
+        class="absolute h-full rounded-full bg-indigo-500/60 hover:bg-indigo-500/80 transition-colors"
+        style="left: {scrollThumbLeft}%; width: {scrollThumbWidth}%"
+      ></div>
+    </div>
+    <button
+      class="flex-none w-3.5 h-3.5 flex items-center justify-center rounded bg-surface-light text-text-muted hover:text-text hover:bg-surface-lighter active:bg-surface-lighter transition-colors text-[9px] leading-none"
+      onclick={zoomIn}
+      disabled={zoomLevel >= 16}
+      aria-label="拡大"
+    >+</button>
   </div>
-  {/if}
 </div>
 

@@ -28,6 +28,8 @@ interface ExportMetadata {
   structureSegments?: { start: number; end: number; label: string }[];
   stemStatus?: StemStatus;
   stemVolumes?: StemVolumes;
+  speed?: number;
+  pitch?: number;
 }
 
 /**
@@ -123,6 +125,8 @@ export async function importTrackFromZip(file: File): Promise<TrackMeta> {
   if (exportMeta.sectionLabels !== undefined) trackMeta.sectionLabels = exportMeta.sectionLabels;
   if (exportMeta.structureSegments !== undefined) trackMeta.structureSegments = exportMeta.structureSegments;
   if (exportMeta.stemVolumes !== undefined) trackMeta.stemVolumes = exportMeta.stemVolumes;
+  if (exportMeta.speed !== undefined) trackMeta.speed = exportMeta.speed;
+  if (exportMeta.pitch !== undefined) trackMeta.pitch = exportMeta.pitch;
 
   // stemStatus: 'ready' only if all advertised stems were actually found in the ZIP
   trackMeta.stemStatus =

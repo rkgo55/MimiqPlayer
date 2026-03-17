@@ -92,6 +92,8 @@ export async function exportTrackAsZip(
   if (meta.structureSegments !== undefined) metaPayload.structureSegments = meta.structureSegments;
   if (meta.stemStatus !== undefined) metaPayload.stemStatus = meta.stemStatus;
   if (meta.stemVolumes !== undefined) metaPayload.stemVolumes = meta.stemVolumes;
+  if (meta.speed !== undefined) metaPayload.speed = meta.speed;
+  if (meta.pitch !== undefined) metaPayload.pitch = meta.pitch;
 
   const metaJson = JSON.stringify(metaPayload, null, 2);
 
