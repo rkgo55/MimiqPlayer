@@ -69,6 +69,14 @@
 
   $effect(() => { showTrimmer; showSectionLines; showABHandles; zoomLevel; zoomOffset; requestAnimationFrame(draw); });
 
+  // コンテナの横幅が変わったら再描画
+  $effect(() => {
+    if (!container) return;
+    const ro = new ResizeObserver(() => requestAnimationFrame(draw));
+    ro.observe(container);
+    return () => ro.disconnect();
+  });
+
   function visibleRange(): { start: number; end: number } {
     const range = 1 / zoomLevel;
     const start = Math.min(Math.max(0, zoomOffset), 1 - range);
