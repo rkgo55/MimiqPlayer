@@ -138,9 +138,9 @@
       const max = timeToX(_mergePreview.a, w), mbx = timeToX(_mergePreview.b, w);
       const cmx = Math.max(0, max), cmbx = Math.min(w, mbx);
       if (cmbx > cmx) {
-        ctx.fillStyle = 'rgba(234,179,8,0.15)';
+        ctx.fillStyle = 'rgba(239,68,68,0.15)';
         ctx.fillRect(cmx, 0, cmbx - cmx, h);
-        ctx.strokeStyle = 'rgba(234,179,8,0.7)'; ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(239,68,68,0.6)'; ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 3]);
         if (max >= 0 && max <= w) { ctx.beginPath(); ctx.moveTo(max, 0); ctx.lineTo(max, h); ctx.stroke(); }
         if (mbx >= 0 && mbx <= w) { ctx.beginPath(); ctx.moveTo(mbx, 0); ctx.lineTo(mbx, h); ctx.stroke(); }
