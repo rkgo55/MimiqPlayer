@@ -209,15 +209,33 @@
 
     <!-- Section list -->
     {#if sections.length > 1 || sectionPoints.length > 0}
-      <div class="space-y-1">
+      <div>
         {#each sections as sec, i (sec.id)}
           {@const isActive = ps.abRepeat.enabled && ps.abRepeat.a === sec.a && ps.abRepeat.b === sec.b}
-          {@const isFirst = i === 0}
-          {@const sp = isFirst ? null : sectionPoints.find((s) => s.id === sec.id)}
+          {@const sp = i === 0 ? null : sectionPoints.find((s) => s.id === sec.id)}
           {@const label = sectionLabels[sec.id]}
-          <div class="space-y-1">
+
+          <!-- Boundary row (between sections) -->
+          {#if i > 0 && sp}
+            <div class="group flex items-center gap-1.5 py-0.5">
+              <div class="flex-1 h-px bg-surface-lighter/60 group-hover:bg-danger/40 transition-colors"></div>
+              <button
+                class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-text-muted/50 hover:bg-danger/15 hover:text-danger transition-all"
+                onclick={() => { if (confirmPaused('この境界を削除すると、前後のセクションが結合されます。続けますか？')) playerStore.deleteSectionPoint(sp.id); }}
+                title="境界を削除して前後のセクションを結合"
+              >
+                <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+                {formatTime(sec.a)}
+              </button>
+              <div class="flex-1 h-px bg-surface-lighter/60 group-hover:bg-danger/40 transition-colors"></div>
+            </div>
+          {/if}
+
+          <!-- Section row -->
+          <div class="space-y-1 mb-0.5">
             <div class="flex items-center gap-1.5">
-              <!-- Section button -->
               <button
                 class="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors
                   {isActive ? 'bg-primary/20 text-primary' : 'bg-surface-lighter hover:bg-surface-lighter/80 text-text'}"
@@ -234,7 +252,7 @@
                 {/if}
               </button>
 
-              <!-- Edit (rename) button — all sections -->
+              <!-- Edit (rename) button -->
               <button
                 class="flex-shrink-0 p-1 rounded transition-all
                   {editingId === sec.id ? 'bg-primary/20 text-primary' : 'text-text-muted/50 hover:bg-surface-lighter hover:text-text'}"
@@ -251,22 +269,6 @@
                   </svg>
                 {/if}
               </button>
-
-              <!-- Delete button — sections 2+ only; invisible placeholder for section 1 to keep alignment -->
-              {#if !isFirst && sp}
-                <button
-                  class="flex-shrink-0 p-1 rounded hover:bg-danger/15 text-text-muted/50 hover:text-danger transition-all"
-                  onclick={() => { if (confirmPaused('このセクションの区切りを削除しますか？')) playerStore.deleteSectionPoint(sp.id); }}
-                  title="このセクションを削除"
-                >
-                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="m19 7-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              {:else}
-                <!-- placeholder to maintain column alignment -->
-                <span class="flex-shrink-0 w-5"></span>
-              {/if}
             </div>
 
             <!-- Rename panel -->
