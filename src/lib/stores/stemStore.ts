@@ -17,7 +17,7 @@ import {
 import { playerStore } from './playerStore';
 import { trackStore } from './trackStore';
 import { settingsStore } from './settingsStore';
-import { getApiClient } from '../audio/apiClient';
+import { getApiClientOrShowModal } from './apiGuard';
 
 export interface StemState {
   /** Separation status of the currently loaded track */
@@ -117,8 +117,8 @@ function createStemStore() {
       const engine = playerStore.engine;
       if (!engine.getAudioBuffer()) return;
 
-      const apiSettings = get(settingsStore);
-      if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
+      const client = getApiClientOrShowModal();
+      if (!client) {
         update((s) => ({ ...s, status: 'error', message: 'APIが設定されていません' }));
         return;
       }
@@ -129,8 +129,6 @@ function createStemStore() {
       try {
         const audioFile = await getAudioFile(trackId);
         if (!audioFile) throw new Error('Audio file not found');
-
-        const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
         const trackMeta = await getTrackMeta(trackId);
         const res = await client.separate(audioFile.data, trackMeta?.contentHash);
 

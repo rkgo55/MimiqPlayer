@@ -7,7 +7,8 @@ import { extractWaveformData } from '../audio/WaveformAnalyzer';
 import { ANALYSIS_CACHE_VERSION } from '../audio/analysisConfig.js';
 import type { WaveformData, ChordInfo } from '../types';
 import { settingsStore } from './settingsStore';
-import { getApiClient, type StructureResponse } from '../audio/apiClient';
+import { type StructureResponse } from '../audio/apiClient';
+import { getApiClientOrShowModal } from './apiGuard';
 import { encodeWavStereo16 } from '../audio/wavUtils';
 
 /** Per-track guard sets — prevents concurrent duplicate processing */
@@ -383,19 +384,16 @@ function createPlayerStore() {
 
         await saveProcessingState({ id: `${currentTrackId}:analyze`, trackId: currentTrackId, tool: 'analyze', startedAt: Date.now() });
         try {
-          const apiSettings = get(settingsStore);
           const audioBuffer = _currentAudioBuffer;
 
           let result: { bpm: number; key: string; chords: ChordInfo[] };
-          if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
-            throw new Error('APIが設定されていません');
-          }
+          const client = getApiClientOrShowModal();
+          if (!client) throw new Error('APIが設定されていません');
           const audioFile = await getAudioFile(currentTrackId);
           if (audioFile && audioFile.data.byteLength > 100 * 1024 * 1024) {
             throw new Error(AI_DURATION_LIMIT_ERROR);
           }
           if (!audioFile) return;
-          const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
           const contentHash = cachedMeta?.contentHash;
           const res = await client.analyze(audioFile.data, contentHash);
           result = { bpm: res.bpm, key: res.key, chords: res.chords as ChordInfo[] };
@@ -625,21 +623,17 @@ function createPlayerStore() {
 
         await saveProcessingState({ id: `${trackId}:structure`, trackId, tool: 'structure', startedAt: Date.now() });
         try {
-        const apiSettings = get(settingsStore);
-
         let generated: LoopBookmark[];
         let structureSegments: { start: number; end: number; label: string }[];
 
-        if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
-          throw new Error('APIが設定されていません');
-        }
+        const client = getApiClientOrShowModal();
+        if (!client) throw new Error('APIが設定されていません');
         // Server-side: allin1 returns functional labels (verse, chorus, …)
           const audioFile = await getAudioFile(trackId);
           if (audioFile && audioFile.data.byteLength > 100 * 1024 * 1024) {
             throw new Error(AI_DURATION_LIMIT_ERROR);
           }
           if (!audioFile) return;
-          const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
           const contentHash = cachedMeta?.contentHash;
 
           // Pass pre-separated stems when available so the server can skip demucs
@@ -815,10 +809,8 @@ function createPlayerStore() {
           segments = cachedMeta.structureSegments;
         } else {
           // Fetch from API
-          const apiSettings = get(settingsStore);
-          if (!apiSettings.apiEndpoint || !apiSettings.apiKey) {
-            throw new Error('APIが設定されていません');
-          }
+          const client = getApiClientOrShowModal();
+          if (!client) throw new Error('APIが設定されていません');
           const audioFile = await getAudioFile(trackId);
           if (audioFile && audioFile.data.byteLength > 100 * 1024 * 1024) {
             throw new Error(AI_DURATION_LIMIT_ERROR);
@@ -827,7 +819,6 @@ function createPlayerStore() {
 
           await saveProcessingState({ id: `${trackId}:structure`, trackId, tool: 'structure', startedAt: Date.now() });
           try {
-            const client = getApiClient(apiSettings.apiEndpoint, apiSettings.apiKey);
             const contentHash = cachedMeta?.contentHash;
 
             const REQUIRED_STEMS = ['bass', 'drums', 'other', 'vocals'] as const;

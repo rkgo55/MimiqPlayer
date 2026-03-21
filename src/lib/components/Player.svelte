@@ -4,6 +4,7 @@
   import { playerStore, activeSectionId, activeBookmarkId, trimStart as trimStartStore, trimEnd as trimEndStore } from '../stores/playerStore';
   import { settingsStore } from '../stores/settingsStore';
   import { apiKeyModalStore } from '../stores/uiStore';
+  import { BETA_FREE_ACCESS } from '../betaConfig';
   import { stemStore, type StemState } from '../stores/stemStore';
   import { get } from 'svelte/store';
   import { getTrackMeta } from '../storage/db';
@@ -692,6 +693,6 @@
 {/if}
 
 <!-- ── API Key Required Modal ─────────────────────────────────────────────── -->
-{#if showApiKeyModal}
+{#if !BETA_FREE_ACCESS && showApiKeyModal}
   <APIKeyRequiredModal />
 {/if}

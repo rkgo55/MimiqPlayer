@@ -1,9 +1,6 @@
 <script lang="ts">
   import { stemStore, type StemState } from '../stores/stemStore';
   import { playerStore } from '../stores/playerStore';
-  import { settingsStore } from '../stores/settingsStore';
-  import { apiKeyModalStore } from '../stores/uiStore';
-  import { get } from 'svelte/store';
   import type { StemType, PlayerState } from '../types';
   import { STEM_TYPES_6, STEM_LABELS } from '../types';
   import { DEFAULT_STEM_VOLUMES } from '../types';
@@ -48,10 +45,6 @@
 
   async function handleSeparate() {
     if (!trackId) return;
-    if (!get(settingsStore).apiKey) {
-      apiKeyModalStore.set(true);
-      return;
-    }
     void stemStore.separate(trackId);
   }
 

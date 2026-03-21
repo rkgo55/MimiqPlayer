@@ -1,7 +1,6 @@
-import { writable, get, derived } from 'svelte/store';
+import { writable } from 'svelte/store';
 import type { AppSettings } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
-import { getApiClient } from '../audio/apiClient';
 
 const STORAGE_KEY = 'mimiqplayer-settings';
 
@@ -51,23 +50,3 @@ function createSettingsStore() {
 
 export const settingsStore = createSettingsStore();
 
-/**
- * Reactive boolean — true when both apiEndpoint and apiKey are configured.
- * Use in Svelte templates: {#if $apiConfigured} … {/if}
- */
-export const apiConfigured = derived(
-  settingsStore,
-  ($s) => !!($s.apiEndpoint && $s.apiKey),
-);
-
-/**
- * Lazily return an ApiClient built from the current settings.
- * Returns null if the API endpoint or key is not configured.
- */
-export function getApiClientFromSettings() {
-  const s = get(settingsStore);
-  if (!s.apiEndpoint || !s.apiKey) {
-    return null;
-  }
-  return getApiClient(s.apiEndpoint, s.apiKey);
-}

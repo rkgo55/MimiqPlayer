@@ -3,6 +3,7 @@
   import { trackStore } from '../stores/trackStore';
   import { playerStore } from '../stores/playerStore';
   import { showTrackListStore, tutorialStore } from '../stores/uiStore';
+  import { BETA_FREE_ACCESS } from '../betaConfig';
 
   const STORAGE_KEY = 'mimiqplayer_tutorial_done_v2';
   const SAMPLE_KEY = 'mimiqplayer_sample_imported';
@@ -68,16 +69,16 @@
     {
       icon: '🤖',
       title: 'AI 機能を使うには',
-      // CAMPAIGN: 一時的にコメントアウト
-      // body: 'AI 機能を使いたい場合は、APIキーが必要です。下記のリンクからお気軽にご連絡ください。',
-      body: 'β版として公開中です。AI 機能を気軽にお試しください。使ってみた感想を下記リンクからぜひ教えてください！',
+      body: BETA_FREE_ACCESS
+        ? 'β版として公開中です。AI 機能を気軽にお試しください。使ってみた感想を下記リンクからぜひ教えてください！'
+        : 'AI 機能を使いたい場合は、APIキーが必要です。下記のリンクからお気軽にご連絡ください。',
     },
     {
       icon: '🔗',
       title: '友達とシェアしよう',
       body: 'トラックをエクスポートし、.mimiqtrack.zip ファイルで友達と共有できます。',
     },
-  ] as const;
+  ];
 </script>
 
 {#if visible}

@@ -1,9 +1,6 @@
 <script lang="ts">
   import { playerStore, analyzingTrackId as analyzingTrackIdStore, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
-  import { settingsStore } from '../stores/settingsStore';
-  import { apiKeyModalStore } from '../stores/uiStore';
   import { getCurrentChord, transposeKey, transposeChord } from '../audio/chordUtils';
-  import { get } from 'svelte/store';
   import type { PlayerState, ChordInfo } from '../types';
 
   let ps: PlayerState = $state({
@@ -85,11 +82,6 @@
 
   async function handleAnalyze() {
     if (isAnalyzing || !ps.trackId) return;
-    // CAMPAIGN: 一時的にコメントアウト
-    // if (!get(settingsStore).apiKey) {
-    //   apiKeyModalStore.set(true);
-    //   return;
-    // }
     aiError = null;
     try {
       await playerStore.analyzeTrack();

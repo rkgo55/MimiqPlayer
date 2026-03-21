@@ -1,7 +1,6 @@
 <script lang="ts">
   import { playerStore, analyzingStructureTrackId as analyzingStructureTrackIdStore, activeSectionId, activeBookmarkId, AI_DURATION_LIMIT_ERROR } from '../stores/playerStore';
-  import { settingsStore } from '../stores/settingsStore';
-  import { apiKeyModalStore, mergePreviewStore } from '../stores/uiStore';
+  import { mergePreviewStore } from '../stores/uiStore';
   import { stemStore, type StemState } from '../stores/stemStore';
   import { get } from 'svelte/store';
   import type { PlayerState, SectionPoint } from '../types';
@@ -107,11 +106,6 @@
 
   async function handleAutoDetect() {
     if (isAnalyzing || !ps.trackId) return;
-    // CAMPAIGN: 一時的にコメントアウト
-    // if (!get(settingsStore).apiKey) {
-    //   apiKeyModalStore.set(true);
-    //   return;
-    // }
     if (stemState.status !== 'ready') {
       stemNotReady = true;
       return;
